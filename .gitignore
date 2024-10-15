@@ -1,0 +1,11 @@
+#All Object Files
+*.o
+
+#Executable
+mccomp
+
+#Ignore LLVM IR files
+*.ll
+
+#VSCode C++ Settings
+.vscode/
