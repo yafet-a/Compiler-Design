@@ -32,90 +32,22 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+#include "llvm_context.h"
 #include "lexer.h"
 #include "tokens.h"
+#include "parser.h"
+#include "ast.h"
 
 using namespace llvm;
 using namespace llvm::sys;
-
-// FILE *pFile;
-// std::string IdentifierStr; // Filled in if IDENT
-// int IntVal;                // Filled in if INT_LIT
-// bool BoolVal;              // Filled in if BOOL_LIT
-// float FloatVal;            // Filled in if FLOAT_LIT
-// std::string StringVal;     // Filled in if String Literal
-// int lineNo, columnNo;
-
-
-//===----------------------------------------------------------------------===//
-// Parser
-//===----------------------------------------------------------------------===//
-
-/// CurTok/getNextToken - Provide a simple token buffer.  CurTok is the current
-/// token the parser is looking at.  getNextToken reads another token from the
-/// lexer and updates CurTok with its results.
-static TOKEN CurTok;
-static std::deque<TOKEN> tok_buffer;
-
-static TOKEN getNextToken() {
-
-  if (tok_buffer.size() == 0)
-    tok_buffer.push_back(gettok());
-
-  TOKEN temp = tok_buffer.front();
-  tok_buffer.pop_front();
-
-  return CurTok = temp;
-}
-
-static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
-
-//===----------------------------------------------------------------------===//
-// AST nodes
-//===----------------------------------------------------------------------===//
-
-/// ASTnode - Base class for all AST nodes.
-class ASTnode {
-public:
-  virtual ~ASTnode() {}
-  virtual Value *codegen() = 0;
-  virtual std::string to_string() const {return "";};
-};
-
-/// IntASTnode - Class for integer literals like 1, 2, 10,
-class IntASTnode : public ASTnode {
-  int Val;
-  TOKEN Tok;
-  std::string Name;
-
-public:
-  IntASTnode(TOKEN tok, int val) : Val(val), Tok(tok) {}
-  virtual Value *codegen() override;
-  // virtual std::string to_string() const override {
-  // return a sting representation of this AST node
-  //};
-};
-
-/* add other AST nodes as nessasary */
-
-//===----------------------------------------------------------------------===//
-// Recursive Descent Parser - Function call for each production
-//===----------------------------------------------------------------------===//
-
-/* Add function calls for each production */
-
-// program ::= extern_list decl_list
-static void parser() {
-  // add body
-}
 
 //===----------------------------------------------------------------------===//
 // Code Generation
 //===----------------------------------------------------------------------===//
 
-static LLVMContext TheContext;
-static IRBuilder<> Builder(TheContext);
-static std::unique_ptr<Module> TheModule;
+LLVMContext TheContext;
+IRBuilder<> Builder(TheContext);
+std::unique_ptr<Module> TheModule;
 
 //===----------------------------------------------------------------------===//
 // AST Printer
@@ -145,13 +77,13 @@ int main(int argc, char **argv) {
   lineNo = 1;
   columnNo = 1;
 
-  // get the first token
+  // // get the first token
   getNextToken();
-  while (CurTok.type != EOF_TOK) {
-    fprintf(stderr, "Token: %s with type %d\n", CurTok.lexeme.c_str(),
-            CurTok.type);
-    getNextToken();
-  }
+  // while (CurTok.type != EOF_TOK) {
+  //   fprintf(stderr, "Token: %s with type %d\n", CurTok.lexeme.c_str(),
+  //           CurTok.type);
+  //   getNextToken();
+  // }
   fprintf(stderr, "Lexer Finished\n");
 
   // Make the module, which holds all the code.
