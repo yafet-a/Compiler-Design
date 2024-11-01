@@ -5,14 +5,12 @@
 #include <deque>
 #include <unordered_set>
 #include <string>
-
-//===----------------------------------------------------------------------===//
-// Parser
-//===----------------------------------------------------------------------===//
+#include <memory>
 
 TOKEN CurTok;
 std::deque<TOKEN> tok_buffer;
 
+// Keep the token management functions the same
 TOKEN getNextToken() {
     if (tok_buffer.empty())
         tok_buffer.push_back(gettok());
@@ -32,378 +30,468 @@ void putBackToken(TOKEN tok) {
     tok_buffer.push_front(tok);
 }
 
-inline void debugParserMsg(const std::string& parserFunc, const std::string& msg = "") {
-    fprintf(stderr, "[%s] %s\n", parserFunc.c_str(), msg.c_str());
-}
-
-bool match(int expectedType) {
-    if (CurTok.type == expectedType) {
-        debugParserMsg("match", "Matched " + tokenTypeToString(expectedType));
-        getNextToken();
-        return true;
-    } else {
-        std::string error = "Expected token of type " + tokenTypeToString(expectedType) +
-                           " (" + std::to_string(expectedType) + ")" +
-                           ", got \"" + CurTok.lexeme + "\" with type " +
-                           tokenTypeToString(CurTok.type) + " (" + 
-                           std::to_string(CurTok.type) + ")";
-        debugParserMsg("match", "ERROR: " + error);
-        std::cerr << error << "\n";
-        return false;
-    }
-}
-
-
-
-//===----------------------------------------------------------------------===//
-// Recursive Descent Parser - Function call for each production
-//===----------------------------------------------------------------------===//
+// First sets (keep only the ones we need)
 std::unordered_set<int> FIRST_program = {EXTERN, INT_TOK, FLOAT_TOK, BOOL_TOK, VOID_TOK};
 std::unordered_set<int> FIRST_decl = {INT_TOK, FLOAT_TOK, BOOL_TOK, VOID_TOK};
 std::unordered_set<int> FIRST_extern = {EXTERN};
 std::unordered_set<int> FIRST_type_spec = {INT_TOK, FLOAT_TOK, BOOL_TOK, VOID_TOK};
 std::unordered_set<int> FIRST_expr = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, LPAR, NOT, MINUS};
-std::unordered_set<int> FIRST_stmt = {LBRA, IF, WHILE, RETURN, IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, LPAR, NOT, MINUS, SC};
-std::unordered_set<int> FIRST_block = {LBRA};
 
-bool parseProgram() {
+// Debug function to print the current function being called
+void debugPrint(const std::string& functionName) {
+    std::cerr << "Entering " << functionName << "\n";
+}
+
+// Modified parser functions to return AST nodes
+std::unique_ptr<ProgramNode> parseProgram() {
+    debugPrint("parseProgram");
     getNextToken(); // Initialize the first token
+    
+    std::vector<std::unique_ptr<ASTnode>> externs;
+    std::vector<std::unique_ptr<ASTnode>> declarations;
 
     // Parse external declarations
     while (CurTok.type == EXTERN) {
-        if (!parseExtern())
-            return false;
+        auto ext = parseExtern();
+        if (!ext) return nullptr;
+        externs.push_back(std::move(ext));
     }
 
-    // Parse declarations (must have at least one)
-    if (!FIRST_decl.count(CurTok.type)) {
-        std::cerr << "Expected declaration\n";
-        return false;
-    }
-
+    // Parse declarations
     while (FIRST_decl.count(CurTok.type)) {
-        if (!parseDecl())
-            return false;
+        auto decl = parseDecl();
+        if (!decl) return nullptr;
+        declarations.push_back(std::move(decl));
     }
 
-    return true;
+    return std::make_unique<ProgramNode>(std::move(externs), std::move(declarations));
 }
 
-bool parseDecl() {
-    debugParserMsg("parseDecl", "Starting");
+std::unique_ptr<ExternNode> parseExtern() {
+    debugPrint("parseExtern");
+    if (CurTok.type != EXTERN) return nullptr;
+    getNextToken();
     
-    if (!FIRST_type_spec.count(CurTok.type)) {
-        std::cerr << "Expected type specifier\n";
-        return false;
-    }
+    std::string returnType = parseTypeSpec();
+    if (returnType.empty()) return nullptr;
+    
+    if (CurTok.type != IDENT) return nullptr;
+    std::string name = CurTok.lexeme;
+    getNextToken();
+    
+    if (CurTok.type != LPAR) return nullptr;
+    getNextToken();
+    
+    auto params = parseParams();
+    if (!params) return nullptr;
+    
+    if (CurTok.type != RPAR) return nullptr;
+    getNextToken();
+    
+    if (CurTok.type != SC) return nullptr;
+    getNextToken();
+    
+    return std::make_unique<ExternNode>(returnType, name, std::move(*params));
+}
 
-    TOKEN savedTok = CurTok;
-    if (!parseTypeSpec()) return false;
-    if (!match(IDENT)) return false;
-
+std::unique_ptr<ASTnode> parseDecl() {
+    debugPrint("parseDecl");
+    std::string returnType = parseTypeSpec();
+    if (returnType.empty()) return nullptr;
+    
+    if (CurTok.type != IDENT) return nullptr;
+    std::string name = CurTok.lexeme;
+    getNextToken();
+    
     if (CurTok.type == LPAR) {
-        // This is a function declaration
-        if (!match(LPAR)) return false;
-        if (!parseParams()) return false;
-        if (!match(RPAR)) return false;
+        // Function declaration
+        getNextToken();
+        auto params = parseParams();
+        if (!params) return nullptr;
+        
+        if (CurTok.type != RPAR) return nullptr;
+        getNextToken();
         
         // Check if this is a function definition (has a body) or just a declaration
         if (CurTok.type == LBRA) {
-            if (!parseBlock()) return false;
+            auto body = parseBlock();
+            if (!body) return nullptr;
+            return std::make_unique<FunctionNode>(returnType, name, std::move(*params), std::move(body));
         } else if (CurTok.type == SC) {
-            if (!match(SC)) return false;
+            getNextToken(); // Consume ';'
+            return std::make_unique<FunctionNode>(returnType, name, std::move(*params), nullptr);
         } else {
             std::cerr << "Expected either function body or semicolon\n";
-            return false;
+            return nullptr;
         }
     } else {
-        // This is a variable declaration
-        if (!match(SC)) return false;
-    }
-
-    debugParserMsg("parseDecl", "Succeeded");
-    return true;
-}
-bool parseLocalDecl() {
-    if (!parseVarType()) return false;
-    if (!match(IDENT)) return false;
-    if (!match(SC)) return false;
-    return true;
-}
-
-bool parseExprStmt() {
-    // Empty statement
-    if (CurTok.type == SC) {
+        // Variable declaration
+        if (CurTok.type != SC) return nullptr;
         getNextToken();
-        return true;
+        return std::make_unique<VarDeclNode>(returnType, name);
     }
-
-    // Expression statement
-    if (FIRST_expr.count(CurTok.type)) {
-        if (!parseExpr()) return false;
-        if (!match(SC)) return false;
-        return true;
-    }
-
-    std::cerr << "Expected expression or semicolon\n";
-    return false;
 }
 
-bool parseReturnStmt() {
-    if (!match(RETURN)) return false;
-
-    // Return with expression
-    if (FIRST_expr.count(CurTok.type)) {
-        if (!parseExpr()) return false;
-    }
-
-    if (!match(SC)) return false;
-    return true;
-}
-
-bool parseExtern() {
-    debugParserMsg("parseExtern", "Starting");
+std::unique_ptr<BlockNode> parseBlock() {
+    debugPrint("parseBlock");
+    if (CurTok.type != LBRA) return nullptr;
+    getNextToken();
     
-    if (!match(EXTERN)) return false;
-    
-    if (!FIRST_type_spec.count(CurTok.type)) {
-        std::cerr << "Expected type specifier\n";
-        return false;
-    }
-    if (!parseTypeSpec()) return false;
-    
-    if (!match(IDENT)) return false;
-    if (!match(LPAR)) return false;
-    if (!parseParams()) return false;
-    if (!match(RPAR)) return false;
-    if (!match(SC)) return false;
-    
-    debugParserMsg("parseExtern", "Succeeded");
-    return true;
-}
-
-bool parseTypeSpec() {
-    if (CurTok.type == VOID_TOK) {
-        getNextToken();
-        return true;
-    }
-    return parseVarType();
-}
-
-bool parseVarType() {
-    switch (CurTok.type) {
-        case INT_TOK:
-        case FLOAT_TOK:
-        case BOOL_TOK:
-            getNextToken();
-            return true;
-        default:
-            std::cerr << "Expected var type\n";
-            return false;
-    }
-}
-
-bool parseParams() {
-    if (CurTok.type == VOID_TOK) {
-        getNextToken();
-        return true;
-    }
-    if (FIRST_type_spec.count(CurTok.type)) {
-        return parseParamList();
-    }
-    return true; // empty parameter list
-}
-
-bool parseParamList() {
-    if (!parseParam()) return false;
-    
-    while (CurTok.type == COMMA) {
-        getNextToken();
-        if (!parseParam()) return false;
-    }
-    return true;
-}
-
-bool parseParam() {
-    if (!parseVarType()) return false;
-    if (!match(IDENT)) return false;
-    return true;
-}
-
-bool parseBlock() {
-    if (!match(LBRA)) return false;
+    std::vector<std::unique_ptr<ASTnode>> declarations;
+    std::vector<std::unique_ptr<ASTnode>> statements;
     
     // Parse local declarations
     while (FIRST_type_spec.count(CurTok.type)) {
-        if (!parseLocalDecl()) return false;
+        auto decl = parseLocalDecl();
+        if (!decl) return nullptr;
+        declarations.push_back(std::move(decl));
     }
     
     // Parse statements
-    while (FIRST_stmt.count(CurTok.type)) {
-        if (!parseStmt()) return false;
+    while (CurTok.type != RBRA) {
+        auto stmt = parseStmt();
+        if (!stmt) return nullptr;
+        statements.push_back(std::move(stmt));
     }
     
-    if (!match(RBRA)) return false;
-    return true;
+    getNextToken(); // consume RBRA
+    return std::make_unique<BlockNode>(std::move(declarations), std::move(statements));
 }
 
-bool parseStmt() {
-    if (CurTok.type == IF) {
-        return parseIfStmt();
-    } else if (CurTok.type == RETURN) {
-        return parseReturnStmt();
-    } else if (FIRST_expr.count(CurTok.type)) {
-        return parseExprStmt();
+std::unique_ptr<ASTnode> parseStmt() {
+    debugPrint("parseStmt");
+    switch (CurTok.type) {
+        case IF:
+            return parseIfStmt();
+        case WHILE:  // Add this case
+            return parseWhile();
+        case RETURN:
+            return parseReturnStmt();
+        default:
+            if (FIRST_expr.count(CurTok.type))
+                return parseExprStmt();
+            return nullptr;
     }
-    std::cerr << "Invalid statement\n";
-    return false;
 }
 
-bool parseIfStmt() {
-    if (!match(IF)) return false;
-    if (!match(LPAR)) return false;
-    if (!parseExpr()) return false;
-    if (!match(RPAR)) return false;
-    if (!parseBlock()) return false;
+std::unique_ptr<IfNode> parseIfStmt() {
+    debugPrint("parseIfStmt");
+    getNextToken(); // consume IF
     
+    if (CurTok.type != LPAR) return nullptr;
+    getNextToken();
+    
+    auto condition = parseExpr();
+    if (!condition) return nullptr;
+    
+    if (CurTok.type != RPAR) return nullptr;
+    getNextToken();
+    
+    auto thenBlock = parseBlock();
+    if (!thenBlock) return nullptr;
+    
+    std::unique_ptr<ASTnode> elseBlock = nullptr;
     if (CurTok.type == ELSE) {
         getNextToken();
-        if (!parseBlock()) return false;
+        elseBlock = parseBlock();
+        if (!elseBlock) return nullptr;
     }
-    return true;
+    
+    return std::make_unique<IfNode>(std::move(condition), std::move(thenBlock), std::move(elseBlock));
 }
 
-bool parseExpr() {
+std::unique_ptr<ASTnode> parseExprStmt() {
+    debugPrint("parseExprStmt");
+    auto expr = parseExpr();
+    if (!expr) return nullptr;
+    
+    if (CurTok.type != SC) return nullptr;
+    getNextToken();
+    
+    return std::make_unique<ExprStmtNode>(std::move(expr));
+}
+
+std::unique_ptr<ReturnNode> parseReturnStmt() {
+    debugPrint("parseReturnStmt");
+    getNextToken(); // consume RETURN
+    
+    if (CurTok.type == SC) {
+        getNextToken(); // consume ';'
+        return std::make_unique<ReturnNode>(nullptr); // void return
+    }
+    
+    auto expr = parseExpr();
+    if (!expr) return nullptr;
+    
+    if (CurTok.type != SC) return nullptr;
+    getNextToken();
+    
+    return std::make_unique<ReturnNode>(std::move(expr));
+}
+
+std::unique_ptr<ASTnode> parseRelational() {
+    debugPrint("parseRelational");
+    auto left = parseAdditive();
+    if (!left) return nullptr;
+    
+    while (CurTok.type == LT || CurTok.type == GT || 
+           CurTok.type == LE || CurTok.type == GE) {
+        std::string op;
+        switch (CurTok.type) {
+            case LT: op = "<"; break;
+            case GT: op = ">"; break;
+            case LE: op = "<="; break;
+            case GE: op = ">="; break;
+        }
+        getNextToken();
+        auto right = parseAdditive();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+    }
+    
+    return left;
+}
+
+std::unique_ptr<ASTnode> parseEquality() {
+    debugPrint("parseEquality");
+    auto left = parseRelational();  // Changed from parseAdditive
+    if (!left) return nullptr;
+    
+    while (CurTok.type == EQ || CurTok.type == NE) {
+        std::string op = CurTok.type == EQ ? "==" : "!=";
+        getNextToken();
+        auto right = parseRelational();  // Changed from parseAdditive
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+    }
+    
+    return left;
+}
+
+// Modify parseExpr to use parseEquality instead of parseAdditive
+std::unique_ptr<ASTnode> parseExpr() {
+    debugPrint("parseExpr");
     if (CurTok.type == IDENT) {
         TOKEN savedTok = CurTok;
         getNextToken();
         if (CurTok.type == ASSIGN) {
             getNextToken();
-            return parseExpr();
+            auto rhs = parseExpr();
+            if (!rhs) return nullptr;
+            return std::make_unique<AssignNode>(savedTok.lexeme, std::move(rhs));
         }
         putBackToken(CurTok);
         CurTok = savedTok;
     }
-    return parseLogicOr();
+    return parseEquality();  // Changed from parseAdditive to parseEquality
 }
 
-bool parseLogicOr() {
-    if (!parseLogicAnd()) return false;
-    
-    while (CurTok.type == OR) {
-        getNextToken();
-        if (!parseLogicAnd()) return false;
-    }
-    return true;
-}
-
-bool parseLogicAnd() {
-    if (!parseEquality()) return false;
-    
-    while (CurTok.type == AND) {
-        getNextToken();
-        if (!parseEquality()) return false;
-    }
-    return true;
-}
-
-bool parseEquality() {
-    if (!parseRelation()) return false;
-    
-    while (CurTok.type == EQ || CurTok.type == NOT) {
-        getNextToken();
-        if (!parseRelation()) return false;
-    }
-    return true;
-}
-
-bool parseRelation() {
-    if (!parseAdditive()) return false;
-    
-    while (CurTok.type == LT || CurTok.type == GT || 
-           CurTok.type == LE || CurTok.type == GE) {
-        getNextToken();
-        if (!parseAdditive()) return false;
-    }
-    return true;
-}
-
-bool parseAdditive() {
-    if (!parseMultiply()) return false;
+std::unique_ptr<ASTnode> parseAdditive() {
+    debugPrint("parseAdditive");
+    auto left = parseMultiply();
+    if (!left) return nullptr;
     
     while (CurTok.type == PLUS || CurTok.type == MINUS) {
+        std::string op = CurTok.type == PLUS ? "+" : "-";
         getNextToken();
-        if (!parseMultiply()) return false;
+        auto right = parseMultiply();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
     }
-    return true;
+    
+    return left;
 }
 
-bool parseMultiply() {
-    if (!parseUnary()) return false;
+std::unique_ptr<ASTnode> parseMultiply() {
+    debugPrint("parseMultiply");
+    auto left = parseUnary(); // Changed from parsePrimary
+    if (!left) return nullptr;
     
     while (CurTok.type == ASTERIX || CurTok.type == DIV || CurTok.type == MOD) {
+        std::string op;
+        switch (CurTok.type) {
+            case ASTERIX: op = "*"; break;
+            case DIV: op = "/"; break;
+            case MOD: op = "%"; break;
+        }
         getNextToken();
-        if (!parseUnary()) return false;
+        auto right = parseUnary(); // Changed from parsePrimary
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
     }
-    return true;
+    
+    return left;
 }
 
-bool parseUnary() {
-    if (CurTok.type == MINUS || CurTok.type == NOT) {
-        getNextToken();
-        return parseUnary();
-    }
-    return parsePrimary();
-}
-
-bool parsePrimary() {
+std::unique_ptr<ASTnode> parsePrimary() {
+    debugPrint("parsePrimary");
     switch (CurTok.type) {
-        case LPAR:
-            getNextToken();
-            if (!parseExpr()) return false;
-            return match(RPAR);
-            
         case IDENT: {
+            std::string name = CurTok.lexeme;
             getNextToken();
             if (CurTok.type == LPAR) {
-                // Function call
                 getNextToken();
-                if (!parseArgs()) return false;
-                return match(RPAR);
+                auto args = parseArgs();
+                if (!args) return nullptr;
+                if (CurTok.type != RPAR) {
+                    std::cerr << "Expected ')' after function arguments\n";
+                    return nullptr;
+                }
+                getNextToken();
+                return std::make_unique<FunctionCallNode>(name, std::move(*args));
             }
-            return true;
+            return std::make_unique<VariableNode>(name);
         }
-            
-        case INT_LIT:
-        case FLOAT_LIT:
-        case BOOL_LIT:
+        case INT_LIT: {
+            int val = std::stoi(CurTok.lexeme);
             getNextToken();
-            return true;
-            
+            return std::make_unique<LiteralNode>(val);
+        }
+        case FLOAT_LIT: {
+            float val = std::stof(CurTok.lexeme);
+            getNextToken();
+            return std::make_unique<LiteralNode>(val);
+        }
+        case BOOL_LIT: {
+            bool val = (CurTok.lexeme == "true");
+            getNextToken();
+            return std::make_unique<LiteralNode>(val);
+        }
+        case LPAR: {
+            getNextToken();
+            auto expr = parseExpr();
+            if (!expr) return nullptr;
+            if (CurTok.type != RPAR) {
+                std::cerr << "Expected ')'\n";
+                return nullptr;
+            }
+            getNextToken();
+            return expr;
+        }
         default:
-            std::cerr << "Expected primary expression\n";
-            return false;
+            std::cerr << "Unexpected token in primary expression\n";
+            return nullptr;
     }
 }
 
-bool parseArgs() {
-    if (!FIRST_expr.count(CurTok.type)) {
-        return true; // empty argument list
+std::unique_ptr<ASTnode> parseUnary() {
+    debugPrint("parseUnary");
+    if (CurTok.type == MINUS || CurTok.type == NOT) {
+        std::string op = (CurTok.type == MINUS) ? "-" : "!";
+        getNextToken(); // Consume the unary operator
+        
+        auto operand = parseUnary(); // Recursive call to handle nested unary expressions
+        if (!operand) return nullptr;
+        
+        return std::make_unique<UnaryOpNode>(op, std::move(operand));
     }
     
-    if (!parseExpr()) return false;
+    return parsePrimary(); // If no unary operator, parse as primary expression
+}
+
+std::unique_ptr<ASTnode> parseLocalDecl() {
+    debugPrint("parseLocalDecl");
+    std::string type = parseTypeSpec();
+    if (type.empty()) return nullptr;
     
-    while (CurTok.type == COMMA) {
+    if (CurTok.type != IDENT) return nullptr;
+    std::string name = CurTok.lexeme;
+    getNextToken();
+    
+    if (CurTok.type != SC) return nullptr;
+    getNextToken();
+    
+    return std::make_unique<VarDeclNode>(type, name);
+}
+
+// Helper functions
+std::string parseTypeSpec() {
+    debugPrint("parseTypeSpec");
+    if (!FIRST_type_spec.count(CurTok.type)) return "";
+    std::string type = CurTok.lexeme;
+    getNextToken();
+    return type;
+}
+
+std::unique_ptr<WhileNode> parseWhile() {
+    debugPrint("parseWhile");
+    getNextToken(); // consume WHILE
+    
+    if (CurTok.type != LPAR) {
+        std::cerr << "Expected '(' after while\n";
+        return nullptr;
+    }
+    getNextToken();
+    
+    auto condition = parseExpr();
+    if (!condition) return nullptr;
+    
+    if (CurTok.type != RPAR) {
+        std::cerr << "Expected ')' after while condition\n";
+        return nullptr;
+    }
+    getNextToken();
+    
+    auto body = parseBlock();
+    if (!body) return nullptr;
+    
+    return std::make_unique<WhileNode>(std::move(condition), std::move(body));
+}
+
+std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
+    debugPrint("parseParams");
+    std::vector<std::pair<std::string, std::string>> params;
+    
+    if (CurTok.type == VOID_TOK) {
         getNextToken();
-        if (!parseExpr()) return false;
+        return params;
     }
     
-    return true;
+    while (true) {
+        if (!FIRST_type_spec.count(CurTok.type)) break;
+        
+        std::string type = parseTypeSpec();
+        if (type.empty()) return std::nullopt;
+        
+        if (CurTok.type != IDENT) return std::nullopt;
+        std::string name = CurTok.lexeme;
+        getNextToken();
+        
+        params.push_back({type, name});
+        
+        if (CurTok.type != COMMA) break;
+        getNextToken();
+    }
+    
+    return params;
+}
+
+std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgs() {
+    debugPrint("parseArgs");
+    std::vector<std::unique_ptr<ASTnode>> args;
+    
+    if (!FIRST_expr.count(CurTok.type)) {
+        return args;
+    }
+    
+    while (true) {
+        auto arg = parseExpr();
+        if (!arg) return std::nullopt;
+        args.push_back(std::move(arg));
+        
+        if (CurTok.type != COMMA) break;
+        getNextToken();
+    }
+    
+    return args;
 }
 
 void parser() {
-    if (parseProgram()) {
-        std::cout << "Parsing succeeded\n";
+    debugPrint("parser");
+    auto program = parseProgram();
+    if (program) {
+        std::cout << "Parsing Finished\n";
+        std::cout << program->to_string();
     } else {
         std::cerr << "Parsing failed\n";
     }
