@@ -32,6 +32,9 @@ std::unique_ptr<ASTnode> parseRelational();
 std::unique_ptr<ASTnode> parsePrimary();
 std::unique_ptr<ASTnode> parseExprStmt();
 std::unique_ptr<ASTnode> parseLocalDecl();
+std::unique_ptr<ExternListNode> parseExternList();
+std::unique_ptr<DeclListNode> parseDeclList();
+std::unique_ptr<DeclListNode> parseDeclListPrime();
 
 // Helper functions
 std::string parseTypeSpec();

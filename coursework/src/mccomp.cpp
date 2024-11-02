@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
   //           CurTok.type);
   //   getNextToken();
   // }
-  fprintf(stderr, "Lexer Finished\n");
+  // fprintf(stderr, "Lexer Finished\n");
 
   // Make the module, which holds all the code.
   TheModule = std::make_unique<Module>("mini-c", TheContext);

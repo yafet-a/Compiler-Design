@@ -1,6 +1,15 @@
 #include "ast.h"
 #include "llvm/IR/IRBuilder.h"
 
+// Type node
+std::string TypeNode::to_string(int indent) const {
+    return indentStr(indent) + "Type: " + typeName + "\n";
+}
+
+Value* TypeNode::codegen() {
+    return nullptr;
+}
+
 // Program node
 std::string ProgramNode::to_string(int indent) const {
     std::string result = indentStr(indent) + "Program\n";
@@ -149,6 +158,33 @@ std::string LiteralNode::to_string(int indent) const {
     
     return indentStr(indent) + typeStr + ": " + valueStr + "\n";
 }
+// ExternListNode
+std::string ExternListNode::to_string(int indent) const {
+    std::string result = indentStr(indent) + "ExternList:\n";
+    for (const auto& ext : externs) {
+        result += ext->to_string(indent + 2);
+    }
+    return result;
+}
+
+Value* ExternListNode::codegen() {
+    return nullptr;
+}
+
+// DeclListNode
+std::string DeclListNode::to_string(int indent) const {
+    std::string result = indentStr(indent) + "DeclList:\n";
+    for (const auto& decl : declarations) {
+        result += decl->to_string(indent + 2);
+    }
+    return result;
+}
+
+Value* DeclListNode::codegen() {
+    return nullptr;
+}
+
+
 // ProgramNode
 Value* ProgramNode::codegen() {
     return nullptr;

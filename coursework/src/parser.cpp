@@ -18,15 +18,15 @@ TOKEN getNextToken() {
     TOKEN temp = tok_buffer.front();
     tok_buffer.pop_front();
 
-    fprintf(stderr, "getNextToken: \"%s\" with type %s (%d)\n", temp.lexeme.c_str(),
-            tokenTypeToString(temp.type).c_str(), temp.type);
+    fprintf(stderr, "getNextToken: \"%s\" with type %s (%d) at line %d\n", temp.lexeme.c_str(),
+            tokenTypeToString(temp.type).c_str(), temp.type, temp.lineNo);
     CurTok = temp;
     return CurTok;
 }
 
 void putBackToken(TOKEN tok) {
-    fprintf(stderr, "putBackToken: \"%s\" with type %s (%d)\n", tok.lexeme.c_str(),
-            tokenTypeToString(tok.type).c_str(), tok.type);
+    fprintf(stderr, "putBackToken: \"%s\" with type %s (%d) at line %d\n", tok.lexeme.c_str(),
+            tokenTypeToString(tok.type).c_str(), tok.type, tok.lineNo);
     tok_buffer.push_front(tok);
 }
 
@@ -39,32 +39,88 @@ std::unordered_set<int> FIRST_expr = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, LPAR,
 
 // Debug function to print the current function being called
 void debugPrint(const std::string& functionName) {
-    std::cerr << "Entering " << functionName << "\n";
+    std::cerr << "Entering " << functionName << " at line " << CurTok.lineNo << "\n";
 }
 
-// Modified parser functions to return AST nodes
 std::unique_ptr<ProgramNode> parseProgram() {
     debugPrint("parseProgram");
-    getNextToken(); // Initialize the first token
-    
     std::vector<std::unique_ptr<ASTnode>> externs;
     std::vector<std::unique_ptr<ASTnode>> declarations;
 
-    // Parse external declarations
-    while (CurTok.type == EXTERN) {
-        auto ext = parseExtern();
-        if (!ext) return nullptr;
-        externs.push_back(std::move(ext));
+    // Don't consume first token here - let the child parsers do it
+    // getNextToken();
+
+    // Check if we start with extern_list
+    if (CurTok.type == EXTERN) {
+        auto externList = parseExternList();
+        if (!externList) {
+            std::cerr << "Error parsing extern list\n";
+            return nullptr;
+        }
+        externs = std::move(externList->externs);
     }
 
-    // Parse declarations
+    // Parse decl_list (required in both productions)
+    auto declList = parseDeclList();
+    if (!declList) {
+        std::cerr << "Error parsing declaration list\n";
+        return nullptr;
+    }
+    declarations = std::move(declList->declarations);
+
+    return std::make_unique<ProgramNode>(std::move(externs), std::move(declarations));
+}
+
+std::unique_ptr<ExternListNode> parseExternList() {
+    debugPrint("parseExternList");
+    std::vector<std::unique_ptr<ASTnode>> externs;
+
+    // Must have at least one extern
+    auto firstExtern = parseExtern();
+    if (!firstExtern) return nullptr;
+    externs.push_back(std::move(firstExtern));
+
+    // Parse the rest through extern_list'
+    while (CurTok.type == EXTERN) {
+        auto nextExtern = parseExtern();
+        if (!nextExtern) return nullptr;
+        externs.push_back(std::move(nextExtern));
+    }
+
+    return std::make_unique<ExternListNode>(std::move(externs));
+}
+
+std::unique_ptr<DeclListNode> parseDeclList() {
+    debugPrint("parseDeclList");
+    std::vector<std::unique_ptr<ASTnode>> declarations;
+
+    // Must have at least one declaration
+    auto firstDecl = parseDecl();
+    if (!firstDecl) return nullptr;
+    declarations.push_back(std::move(firstDecl));
+
+    // Parse the rest through decl_list'
+    auto rest = parseDeclListPrime();
+    if (rest) {
+        for (auto& decl : rest->declarations) {
+            declarations.push_back(std::move(decl));
+        }
+    }
+
+    return std::make_unique<DeclListNode>(std::move(declarations));
+}
+
+std::unique_ptr<DeclListNode> parseDeclListPrime() {
+    debugPrint("parseDeclListPrime");
+    std::vector<std::unique_ptr<ASTnode>> declarations;
+
     while (FIRST_decl.count(CurTok.type)) {
         auto decl = parseDecl();
         if (!decl) return nullptr;
         declarations.push_back(std::move(decl));
     }
 
-    return std::make_unique<ProgramNode>(std::move(externs), std::move(declarations));
+    return std::make_unique<DeclListNode>(std::move(declarations));
 }
 
 std::unique_ptr<ExternNode> parseExtern() {
@@ -96,38 +152,71 @@ std::unique_ptr<ExternNode> parseExtern() {
 
 std::unique_ptr<ASTnode> parseDecl() {
     debugPrint("parseDecl");
+    std::cerr << "Before parseTypeSpec, token: " << CurTok.lexeme << "\n"; // Debug
+
     std::string returnType = parseTypeSpec();
-    if (returnType.empty()) return nullptr;
-    
-    if (CurTok.type != IDENT) return nullptr;
+    std::cerr << "After parseTypeSpec, returnType: " << returnType << "\n"; // Debug
+    std::cerr << "Current token: " << CurTok.lexeme << "\n"; // Debug
+    // Step 1: Parse the return type (e.g., int, float, etc.)
+    if (returnType.empty()) {
+        std::cerr << "Expected type specifier in declaration\n";
+        return nullptr;
+    }
+
+    // Step 2: Expect an identifier (function/variable name)
+    if (CurTok.type != IDENT) {
+        std::cerr << "Expected identifier after type '" << returnType << "', got " 
+                  << tokenTypeToString(CurTok.type) << "\n";
+        return nullptr;
+    }
     std::string name = CurTok.lexeme;
+    std::cerr << "Processing declaration of '" << name << "'\n";  // Debug print
     getNextToken();
-    
+
+    // Step 3: Check if this is a function declaration/definition or variable declaration
     if (CurTok.type == LPAR) {
-        // Function declaration
+        // Function declaration or definition
+        std::cerr << "Found function declaration/definition\n";  // Debug print
         getNextToken();
         auto params = parseParams();
-        if (!params) return nullptr;
-        
-        if (CurTok.type != RPAR) return nullptr;
+        if (!params) {
+            std::cerr << "Error parsing function parameters\n";
+            return nullptr;
+        }
+
+        if (CurTok.type != RPAR) {
+            std::cerr << "Expected ')' after function parameters, got " 
+                      << tokenTypeToString(CurTok.type) << "\n";
+            return nullptr;
+        }
         getNextToken();
-        
-        // Check if this is a function definition (has a body) or just a declaration
+
         if (CurTok.type == LBRA) {
+            // Function definition
+            std::cerr << "Parsing function body\n";  // Debug print
             auto body = parseBlock();
-            if (!body) return nullptr;
+            if (!body) {
+                std::cerr << "Error parsing function body\n";
+                return nullptr;
+            }
             return std::make_unique<FunctionNode>(returnType, name, std::move(*params), std::move(body));
         } else if (CurTok.type == SC) {
+            // Function declaration without body
             getNextToken(); // Consume ';'
             return std::make_unique<FunctionNode>(returnType, name, std::move(*params), nullptr);
         } else {
-            std::cerr << "Expected either function body or semicolon\n";
+            std::cerr << "Expected '{' for function body or ';' for declaration, got " 
+                      << tokenTypeToString(CurTok.type) << "\n";
             return nullptr;
         }
     } else {
         // Variable declaration
-        if (CurTok.type != SC) return nullptr;
-        getNextToken();
+        if (CurTok.type != SC) {
+            std::cerr << "Expected ';' after variable declaration, got " 
+                      << tokenTypeToString(CurTok.type) << "\n";
+            return nullptr;
+        }
+        getNextToken(); // Consume ';'
         return std::make_unique<VarDeclNode>(returnType, name);
     }
 }
@@ -398,7 +487,7 @@ std::unique_ptr<ASTnode> parseLocalDecl() {
     std::string name = CurTok.lexeme;
     getNextToken();
     
-    if (CurTok.type != SC) return nullptr;
+    if (CurTok.type != SC) return nullptr; //Expected ';'
     getNextToken();
     
     return std::make_unique<VarDeclNode>(type, name);
@@ -407,9 +496,14 @@ std::unique_ptr<ASTnode> parseLocalDecl() {
 // Helper functions
 std::string parseTypeSpec() {
     debugPrint("parseTypeSpec");
-    if (!FIRST_type_spec.count(CurTok.type)) return "";
-    std::string type = CurTok.lexeme;
-    getNextToken();
+    std::string type = CurTok.lexeme;  // Get the type name BEFORE checking
+    
+    if (!FIRST_type_spec.count(CurTok.type)) {
+        std::cerr << "Token type not in FIRST_type_spec: " << tokenTypeToString(CurTok.type) << "\n";
+        return "";
+    }
+    
+    getNextToken();  // Only consume the token AFTER we've verified and saved it
     return type;
 }
 
@@ -441,6 +535,11 @@ std::unique_ptr<WhileNode> parseWhile() {
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
     debugPrint("parseParams");
     std::vector<std::pair<std::string, std::string>> params;
+    
+    // Handle empty parameter list
+    if (CurTok.type == RPAR) {
+        return params;  // Return empty params vector
+    }
     
     if (CurTok.type == VOID_TOK) {
         getNextToken();

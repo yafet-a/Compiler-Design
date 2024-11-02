@@ -1,4 +1,3 @@
-// ast.h
 #ifndef AST_H
 #define AST_H
 
@@ -22,6 +21,15 @@ protected:
     std::string indentStr(int indent) const {
         return std::string(indent, ' ') + " ";
     }
+};
+
+// Type node
+class TypeNode : public ASTnode {
+    std::string typeName;
+public:
+    TypeNode(std::string typeName) : typeName(typeName) {}
+    Value* codegen() override;
+    std::string to_string(int indent = 0) const override;
 };
 
 // Program node - represents the entire program
@@ -112,6 +120,29 @@ public:
     std::string to_string(int indent = 0) const override;
 };
 
+// ExternList node
+class ExternListNode : public ASTnode {
+public:
+    std::vector<std::unique_ptr<ASTnode>> externs;
+    
+    ExternListNode(std::vector<std::unique_ptr<ASTnode>> exts)
+        : externs(std::move(exts)) {}
+    
+    Value* codegen() override;
+    std::string to_string(int indent = 0) const override;
+};
+
+// DeclList node
+class DeclListNode : public ASTnode {
+public:
+    std::vector<std::unique_ptr<ASTnode>> declarations;
+    
+    DeclListNode(std::vector<std::unique_ptr<ASTnode>> decls)
+        : declarations(std::move(decls)) {}
+    
+    Value* codegen() override;
+    std::string to_string(int indent = 0) const override;
+};
 class ReturnNode : public ASTnode {
     std::unique_ptr<ASTnode> value; // nullptr for void return
 public:
