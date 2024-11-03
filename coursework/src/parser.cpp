@@ -47,9 +47,6 @@ std::unique_ptr<ProgramNode> parseProgram() {
     std::vector<std::unique_ptr<ASTnode>> externs;
     std::vector<std::unique_ptr<ASTnode>> declarations;
 
-    // Don't consume first token here - let the child parsers do it
-    // getNextToken();
-
     // Check if we start with extern_list
     if (CurTok.type == EXTERN) {
         auto externList = parseExternList();
@@ -357,7 +354,6 @@ std::unique_ptr<ASTnode> parseEquality() {
     return left;
 }
 
-// Modify parseExpr to use parseEquality instead of parseAdditive
 std::unique_ptr<ASTnode> parseExpr() {
     debugPrint("parseExpr");
     if (CurTok.type == IDENT) {
@@ -372,7 +368,7 @@ std::unique_ptr<ASTnode> parseExpr() {
         putBackToken(CurTok);
         CurTok = savedTok;
     }
-    return parseEquality();  // Changed from parseAdditive to parseEquality
+    return parseLogicOr();  // Changed from parseEquality to parseLogicOr
 }
 
 std::unique_ptr<ASTnode> parseAdditive() {
@@ -526,7 +522,8 @@ std::unique_ptr<WhileNode> parseWhile() {
     }
     getNextToken();
     
-    auto body = parseBlock();
+    // Changed from parseBlock() to parseStmt() to match grammar
+    auto body = parseStmt();
     if (!body) return nullptr;
     
     return std::make_unique<WhileNode>(std::move(condition), std::move(body));
@@ -563,6 +560,38 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
     }
     
     return params;
+}
+
+std::unique_ptr<ASTnode> parseLogicOr() {
+    debugPrint("parseLogicOr");
+    auto left = parseLogicAnd();
+    if (!left) return nullptr;
+    
+    while (CurTok.type == OR) {
+        std::string op = "||";
+        getNextToken();
+        auto right = parseLogicAnd();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+    }
+    
+    return left;
+}
+
+std::unique_ptr<ASTnode> parseLogicAnd() {
+    debugPrint("parseLogicAnd");
+    auto left = parseEquality();  // Note: this chains to your existing parseEquality()
+    if (!left) return nullptr;
+    
+    while (CurTok.type == AND) {
+        std::string op = "&&";
+        getNextToken();
+        auto right = parseEquality();
+        if (!right) return nullptr;
+        left = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+    }
+    
+    return left;
 }
 
 std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgs() {
