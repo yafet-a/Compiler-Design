@@ -29,8 +29,9 @@ std::unique_ptr<ASTnode> parsePrimary();
 std::unique_ptr<ASTnode> parseExprStmt();
 std::unique_ptr<ASTnode> parseLocalDecl();
 std::unique_ptr<ExternListNode> parseExternList();
+std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs);
 std::unique_ptr<DeclListNode> parseDeclList();
-std::unique_ptr<DeclListNode> parseDeclListPrime();
+std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations);
 std::unique_ptr<ASTnode> parseLogicOr();
 std::unique_ptr<ASTnode> parseLogicAnd();
 std::unique_ptr<ASTnode> parseEquality();
@@ -48,11 +49,22 @@ std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left);
 std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left);
 std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left);
 
-// Helper functions
 std::string parseTypeSpec();
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParams();
-std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgs();
+std::optional<std::vector<std::pair<std::string, std::string>>> parseParamList();
+std::optional<std::vector<std::pair<std::string, std::string>>> parseParamListPrime(
+    std::vector<std::pair<std::string, std::string>>&& params);
+std::optional<std::pair<std::string, std::string>> parseParam();
+std::unique_ptr<ASTnode> parseAssignExpr();
+std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgList();
+std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgListPrime(
+    std::vector<std::unique_ptr<ASTnode>>&& args);
 
+// Add these declarations:
+std::unique_ptr<DeclListNode> parseLocalDecls();
+std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<ASTnode>>&& decls);
+std::vector<std::unique_ptr<ASTnode>> parseStmtList();
+std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique_ptr<ASTnode>>&& stmts);
 // First sets
 extern std::unordered_set<int> FIRST_program;
 extern std::unordered_set<int> FIRST_decl;

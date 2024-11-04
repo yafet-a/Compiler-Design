@@ -68,22 +68,35 @@ std::unique_ptr<ProgramNode> parseProgram() {
     return std::make_unique<ProgramNode>(std::move(externs), std::move(declarations));
 }
 
+// extern_list ::= extern extern_list'
 std::unique_ptr<ExternListNode> parseExternList() {
     debugPrint("parseExternList");
     std::vector<std::unique_ptr<ASTnode>> externs;
 
     // Must have at least one extern
     auto firstExtern = parseExtern();
-    if (!firstExtern) return nullptr;
+    if (!firstExtern) {
+        std::cerr << "Expected extern declaration\n";
+        return nullptr;
+    }
     externs.push_back(std::move(firstExtern));
+    
+    return parseExternListPrime(std::move(externs));
+}
 
-    // Parse the rest through extern_list'
-    while (CurTok.type == EXTERN) {
+// extern_list' ::= extern extern_list'
+//                | epsilon
+std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs) {
+    debugPrint("parseExternListPrime");
+    
+    if (CurTok.type == EXTERN) {
         auto nextExtern = parseExtern();
         if (!nextExtern) return nullptr;
         externs.push_back(std::move(nextExtern));
+        return parseExternListPrime(std::move(externs));
     }
-
+    
+    // epsilon production
     return std::make_unique<ExternListNode>(std::move(externs));
 }
 
@@ -91,32 +104,30 @@ std::unique_ptr<DeclListNode> parseDeclList() {
     debugPrint("parseDeclList");
     std::vector<std::unique_ptr<ASTnode>> declarations;
 
-    // Must have at least one declaration
+    // decl_list ::= decl decl_list'
     auto firstDecl = parseDecl();
-    if (!firstDecl) return nullptr;
-    declarations.push_back(std::move(firstDecl));
-
-    // Parse the rest through decl_list'
-    auto rest = parseDeclListPrime();
-    if (rest) {
-        for (auto& decl : rest->declarations) {
-            declarations.push_back(std::move(decl));
-        }
+    if (!firstDecl) {
+        std::cerr << "Expected declaration at start of declaration list\n";
+        return nullptr;
     }
-
-    return std::make_unique<DeclListNode>(std::move(declarations));
+    declarations.push_back(std::move(firstDecl));
+    
+    return parseDeclListPrime(std::move(declarations));
 }
 
-std::unique_ptr<DeclListNode> parseDeclListPrime() {
+std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations) {
     debugPrint("parseDeclListPrime");
-    std::vector<std::unique_ptr<ASTnode>> declarations;
-
-    while (FIRST_decl.count(CurTok.type)) {
-        auto decl = parseDecl();
-        if (!decl) return nullptr;
-        declarations.push_back(std::move(decl));
+    
+    // decl_list' ::= decl decl_list'
+    //              | epsilon
+    if (FIRST_decl.count(CurTok.type)) {
+        auto nextDecl = parseDecl();
+        if (!nextDecl) return nullptr;
+        declarations.push_back(std::move(nextDecl));
+        return parseDeclListPrime(std::move(declarations));
     }
-
+    
+    // epsilon production
     return std::make_unique<DeclListNode>(std::move(declarations));
 }
 
@@ -220,28 +231,60 @@ std::unique_ptr<ASTnode> parseDecl() {
 
 std::unique_ptr<BlockNode> parseBlock() {
     debugPrint("parseBlock");
-    if (CurTok.type != LBRA) return nullptr;
+    if (CurTok.type != LBRA) {
+        std::cerr << "Expected '{' at start of block\n";
+        return nullptr;
+    }
     getNextToken();
     
-    std::vector<std::unique_ptr<ASTnode>> declarations;
-    std::vector<std::unique_ptr<ASTnode>> statements;
-    
     // Parse local declarations
-    while (FIRST_type_spec.count(CurTok.type)) {
-        auto decl = parseLocalDecl();
-        if (!decl) return nullptr;
-        declarations.push_back(std::move(decl));
+    auto declarations = parseLocalDecls();
+    if (!declarations) {
+        std::cerr << "Error parsing local declarations\n";
+        return nullptr;
     }
     
     // Parse statements
-    while (CurTok.type != RBRA) {
-        auto stmt = parseStmt();
-        if (!stmt) return nullptr;
-        statements.push_back(std::move(stmt));
+    auto statements = parseStmtList();
+    
+    if (CurTok.type != RBRA) {
+        std::cerr << "Expected '}' at end of block\n";
+        return nullptr;
+    }
+    getNextToken();
+    
+    return std::make_unique<BlockNode>(std::move(declarations->declarations), std::move(statements));
+}
+
+std::unique_ptr<DeclListNode> parseLocalDecls() {
+    debugPrint("parseLocalDecls");
+    
+    // local_decls ::= local_decls local_decl | epsilon
+    if (!FIRST_type_spec.count(CurTok.type)) {
+        // epsilon production
+        return std::make_unique<DeclListNode>(std::vector<std::unique_ptr<ASTnode>>());
     }
     
-    getNextToken(); // consume RBRA
-    return std::make_unique<BlockNode>(std::move(declarations), std::move(statements));
+    std::vector<std::unique_ptr<ASTnode>> decls;
+    auto firstDecl = parseLocalDecl();
+    if (!firstDecl) return nullptr;
+    decls.push_back(std::move(firstDecl));
+    
+    return parseLocalDeclsPrime(std::move(decls));
+}
+
+std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<ASTnode>>&& decls) {
+    debugPrint("parseLocalDeclsPrime");
+    
+    if (FIRST_type_spec.count(CurTok.type)) {
+        auto nextDecl = parseLocalDecl();
+        if (!nextDecl) return nullptr;
+        decls.push_back(std::move(nextDecl));
+        return parseLocalDeclsPrime(std::move(decls));
+    }
+    
+    // epsilon production
+    return std::make_unique<DeclListNode>(std::move(decls));
 }
 
 std::unique_ptr<ASTnode> parseStmt() {
@@ -261,8 +304,40 @@ std::unique_ptr<ASTnode> parseStmt() {
         default:
             if (FIRST_expr.count(CurTok.type))
                 return parseExprStmt();
+            std::cerr << "Unexpected token in statement\n";
             return nullptr;
     }
+}
+
+std::vector<std::unique_ptr<ASTnode>> parseStmtList() {
+    debugPrint("parseStmtList");
+    
+    // stmt_list ::= stmt_list stmt | epsilon
+    if (CurTok.type == RBRA) {
+        // epsilon production
+        return std::vector<std::unique_ptr<ASTnode>>();
+    }
+    
+    std::vector<std::unique_ptr<ASTnode>> stmts;
+    auto firstStmt = parseStmt();
+    if (!firstStmt) return std::vector<std::unique_ptr<ASTnode>>();
+    stmts.push_back(std::move(firstStmt));
+    
+    return parseStmtListPrime(std::move(stmts));
+}
+
+std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique_ptr<ASTnode>>&& stmts) {
+    debugPrint("parseStmtListPrime");
+    
+    if (CurTok.type != RBRA) {  // If we haven't reached the end of the block
+        auto nextStmt = parseStmt();
+        if (!nextStmt) return std::vector<std::unique_ptr<ASTnode>>();
+        stmts.push_back(std::move(nextStmt));
+        return parseStmtListPrime(std::move(stmts));
+    }
+    
+    // epsilon production
+    return stmts;
 }
 
 std::unique_ptr<IfNode> parseIfStmt() {
@@ -386,6 +461,7 @@ std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// logic_or ::= logic_and logic_or'
 std::unique_ptr<ASTnode> parseLogicOr() {
     debugPrint("parseLogicOr");
     auto left = parseLogicAnd();
@@ -393,6 +469,8 @@ std::unique_ptr<ASTnode> parseLogicOr() {
     return parseLogicOrPrime(std::move(left));
 }
 
+// logic_or' ::= "||" logic_and logic_or'
+//             | epsilon
 std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
     debugPrint("parseLogicOrPrime");
     if (CurTok.type == OR) {
@@ -406,13 +484,16 @@ std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
 }
 
 std::unique_ptr<ASTnode> parseExpr() {
-    debugPrint("parseExpr");
+    return parseAssignExpr();
+}
+
+std::unique_ptr<ASTnode> parseAssignExpr() {
     if (CurTok.type == IDENT) {
         TOKEN savedTok = CurTok;
         getNextToken();
         if (CurTok.type == ASSIGN) {
             getNextToken();
-            auto rhs = parseExpr();
+            auto rhs = parseAssignExpr();  // Now correctly recursive
             if (!rhs) return nullptr;
             return std::make_unique<AssignNode>(savedTok.lexeme, std::move(rhs));
         }
@@ -466,6 +547,7 @@ std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
     }
     return left;
 }
+
 std::unique_ptr<ASTnode> parsePrimary() {
     debugPrint("parsePrimary");
     switch (CurTok.type) {
@@ -474,7 +556,7 @@ std::unique_ptr<ASTnode> parsePrimary() {
             getNextToken();
             if (CurTok.type == LPAR) {
                 getNextToken();
-                auto args = parseArgs();
+                auto args = parseArgList();
                 if (!args) return nullptr;
                 if (CurTok.type != RPAR) {
                     std::cerr << "Expected ')' after function arguments\n";
@@ -589,55 +671,97 @@ std::unique_ptr<WhileNode> parseWhile() {
 
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
     debugPrint("parseParams");
-    std::vector<std::pair<std::string, std::string>> params;
     
     // Handle empty parameter list
     if (CurTok.type == RPAR) {
-        return params;  // Return empty params vector
+        return std::vector<std::pair<std::string, std::string>>();
     }
     
+    // Handle void parameter
     if (CurTok.type == VOID_TOK) {
         getNextToken();
-        return params;
+        return std::vector<std::pair<std::string, std::string>>();
     }
     
-    while (true) {
-        if (!FIRST_type_spec.count(CurTok.type)) break;
-        
-        std::string type = parseTypeSpec();
-        if (type.empty()) return std::nullopt;
-        
-        if (CurTok.type != IDENT) return std::nullopt;
-        std::string name = CurTok.lexeme;
-        getNextToken();
-        
-        params.push_back({type, name});
-        
-        if (CurTok.type != COMMA) break;
-        getNextToken();
-    }
-    
-    return params;
+    return parseParamList();
 }
 
-std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgs() {
-    debugPrint("parseArgs");
+std::optional<std::pair<std::string, std::string>> parseParam() {
+    debugPrint("parseParam");
+    
+    if (!FIRST_type_spec.count(CurTok.type)) {
+        std::cerr << "Expected type specifier in parameter\n";
+        return std::nullopt;
+    }
+    
+    std::string type = parseTypeSpec();
+    if (type.empty()) return std::nullopt;
+    
+    if (CurTok.type != IDENT) {
+        std::cerr << "Expected identifier in parameter\n";
+        return std::nullopt;
+    }
+    std::string name = CurTok.lexeme;
+    getNextToken();
+    
+    return std::make_pair(type, name);
+}
+
+std::optional<std::vector<std::pair<std::string, std::string>>> parseParamList() {
+    debugPrint("parseParamList");
+    std::vector<std::pair<std::string, std::string>> params;
+    
+    // param_list ::= param param_list'
+    auto firstParam = parseParam();
+    if (!firstParam) {
+        std::cerr << "Error parsing first parameter\n";
+        return std::nullopt;
+    }
+    
+    params.push_back(std::move(*firstParam));
+    return parseParamListPrime(std::move(params));
+}
+
+std::optional<std::vector<std::pair<std::string, std::string>>> parseParamListPrime(
+    std::vector<std::pair<std::string, std::string>>&& params) {
+    debugPrint("parseParamListPrime");
+    
+    // param_list' ::= "," param param_list'
+    //               | epsilon
+    if (CurTok.type == COMMA) {
+        getNextToken();
+        auto nextParam = parseParam();
+        if (!nextParam) {
+            std::cerr << "Error parsing parameter after comma\n";
+            return std::nullopt;
+        }
+        params.push_back(std::move(*nextParam));
+        return parseParamListPrime(std::move(params));
+    }
+    
+    // epsilon production
+    return params;
+}
+std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgList() {
     std::vector<std::unique_ptr<ASTnode>> args;
     
-    if (!FIRST_expr.count(CurTok.type)) {
-        return args;
-    }
+    auto firstArg = parseExpr();
+    if (!firstArg) return std::nullopt;
+    args.push_back(std::move(firstArg));
     
-    while (true) {
-        auto arg = parseExpr();
-        if (!arg) return std::nullopt;
-        args.push_back(std::move(arg));
-        
-        if (CurTok.type != COMMA) break;
+    return parseArgListPrime(std::move(args));
+}
+
+std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgListPrime(
+    std::vector<std::unique_ptr<ASTnode>>&& args) { 
+    if (CurTok.type == COMMA) {
         getNextToken();
+        auto nextArg = parseExpr();
+        if (!nextArg) return std::nullopt;
+        args.push_back(std::move(nextArg));
+        return parseArgListPrime(std::move(args));
     }
-    
-    return args;
+    return args;  // epsilon production
 }
 
 void parser() {
