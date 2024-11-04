@@ -25,10 +25,6 @@ std::unique_ptr<ReturnNode> parseReturnStmt();
 std::unique_ptr<ASTnode> parseUnary();
 std::unique_ptr<WhileNode> parseWhile();
 std::unique_ptr<ASTnode> parseExpr();
-std::unique_ptr<ASTnode> parseAdditive();
-std::unique_ptr<ASTnode> parseMultiply();
-std::unique_ptr<ASTnode> parseEquality();
-std::unique_ptr<ASTnode> parseRelational();
 std::unique_ptr<ASTnode> parsePrimary();
 std::unique_ptr<ASTnode> parseExprStmt();
 std::unique_ptr<ASTnode> parseLocalDecl();
@@ -37,6 +33,14 @@ std::unique_ptr<DeclListNode> parseDeclList();
 std::unique_ptr<DeclListNode> parseDeclListPrime();
 std::unique_ptr<ASTnode> parseLogicOr();
 std::unique_ptr<ASTnode> parseLogicAnd();
+std::unique_ptr<ASTnode> parseEquality();
+std::unique_ptr<ASTnode> parseRelational();
+std::unique_ptr<ASTnode> parseAdditive();
+std::unique_ptr<ASTnode> parseMultiply();
+std::unique_ptr<ASTnode> parseUnary();
+std::unique_ptr<ASTnode> parsePrimary();
+
+// Prime functions for binary operators
 std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left);
 std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left);
 std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left);

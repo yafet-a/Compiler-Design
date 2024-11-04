@@ -249,10 +249,15 @@ std::unique_ptr<ASTnode> parseStmt() {
     switch (CurTok.type) {
         case IF:
             return parseIfStmt();
-        case WHILE:  // Add this case
+        case WHILE:
             return parseWhile();
         case RETURN:
             return parseReturnStmt();
+        case LBRA:
+            return parseBlock();  // matches "stmt ::= block"
+        case SC:
+            getNextToken(); // consume the semicolon
+            return std::make_unique<ExprStmtNode>(nullptr); // empty expr_stmt
         default:
             if (FIRST_expr.count(CurTok.type))
                 return parseExprStmt();
@@ -316,12 +321,14 @@ std::unique_ptr<ReturnNode> parseReturnStmt() {
 }
 
 std::unique_ptr<ASTnode> parseRelational() {
+    debugPrint("parseRelational");
     auto left = parseAdditive();
     if (!left) return nullptr;
     return parseRelationalPrime(std::move(left));
 }
 
 std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseRelationalPrime");
     if (CurTok.type == LT || CurTok.type == GT || 
         CurTok.type == LE || CurTok.type == GE) {
         std::string op;
@@ -334,28 +341,66 @@ std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left) {
         getNextToken();
         auto right = parseAdditive();
         if (!right) return nullptr;
-        return parseRelationalPrime(
-            std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right))
-        );
+        auto newLeft = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+        return parseRelationalPrime(std::move(newLeft));
     }
     return left;
 }
 
 std::unique_ptr<ASTnode> parseEquality() {
+    debugPrint("parseEquality");
     auto left = parseRelational();
     if (!left) return nullptr;
     return parseEqualityPrime(std::move(left));
 }
 
 std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseEqualityPrime");
     if (CurTok.type == EQ || CurTok.type == NE) {
         std::string op = CurTok.type == EQ ? "==" : "!=";
         getNextToken();
         auto right = parseRelational();
         if (!right) return nullptr;
-        return parseEqualityPrime(
-            std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right))
-        );
+        auto newLeft = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+        return parseEqualityPrime(std::move(newLeft));
+    }
+    return left;
+}
+
+std::unique_ptr<ASTnode> parseLogicAnd() {
+    debugPrint("parseLogicAnd");
+    auto left = parseEquality();
+    if (!left) return nullptr;
+    return parseLogicAndPrime(std::move(left));
+}
+
+std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseLogicAndPrime");
+    if (CurTok.type == AND) {
+        getNextToken();
+        auto right = parseEquality();
+        if (!right) return nullptr;
+        auto newLeft = std::make_unique<BinaryOpNode>("&&", std::move(left), std::move(right));
+        return parseLogicAndPrime(std::move(newLeft));
+    }
+    return left;
+}
+
+std::unique_ptr<ASTnode> parseLogicOr() {
+    debugPrint("parseLogicOr");
+    auto left = parseLogicAnd();
+    if (!left) return nullptr;
+    return parseLogicOrPrime(std::move(left));
+}
+
+std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseLogicOrPrime");
+    if (CurTok.type == OR) {
+        getNextToken();
+        auto right = parseLogicAnd();
+        if (!right) return nullptr;
+        auto newLeft = std::make_unique<BinaryOpNode>("||", std::move(left), std::move(right));
+        return parseLogicOrPrime(std::move(newLeft));
     }
     return left;
 }
@@ -374,35 +419,38 @@ std::unique_ptr<ASTnode> parseExpr() {
         putBackToken(CurTok);
         CurTok = savedTok;
     }
-    return parseLogicOr();  // Changed from parseEquality to parseLogicOr
+    return parseLogicOr();
 }
 
 std::unique_ptr<ASTnode> parseAdditive() {
+    debugPrint("parseAdditive");
     auto left = parseMultiply();
     if (!left) return nullptr;
     return parseAdditivePrime(std::move(left));
 }
 
 std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseAdditivePrime");
     if (CurTok.type == PLUS || CurTok.type == MINUS) {
         std::string op = CurTok.type == PLUS ? "+" : "-";
         getNextToken();
         auto right = parseMultiply();
         if (!right) return nullptr;
-        return parseAdditivePrime(
-            std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right))
-        );
+        auto newLeft = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+        return parseAdditivePrime(std::move(newLeft));
     }
     return left;
 }
 
 std::unique_ptr<ASTnode> parseMultiply() {
+    debugPrint("parseMultiply");
     auto left = parseUnary();
     if (!left) return nullptr;
     return parseMultiplyPrime(std::move(left));
 }
 
 std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
+    debugPrint("parseMultiplyPrime");
     if (CurTok.type == ASTERIX || CurTok.type == DIV || CurTok.type == MOD) {
         std::string op;
         switch (CurTok.type) {
@@ -413,9 +461,8 @@ std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
         getNextToken();
         auto right = parseUnary();
         if (!right) return nullptr;
-        return parseMultiplyPrime(
-            std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right))
-        );
+        auto newLeft = std::make_unique<BinaryOpNode>(op, std::move(left), std::move(right));
+        return parseMultiplyPrime(std::move(newLeft));
     }
     return left;
 }
@@ -500,6 +547,7 @@ std::unique_ptr<ASTnode> parseLocalDecl() {
     return std::make_unique<VarDeclNode>(type, name);
 }
 
+// Helper functions
 std::string parseTypeSpec() {
     debugPrint("parseTypeSpec");
     std::string type = CurTok.lexeme;  // Get the type name BEFORE checking
@@ -532,8 +580,8 @@ std::unique_ptr<WhileNode> parseWhile() {
     }
     getNextToken();
     
-    // Changed from parseBlock() to parseStmt() to match grammar
-    auto body = parseStmt();
+    // This matches the grammar production "while_stmt ::= while ( expr ) stmt"
+    auto body = parseStmt();  
     if (!body) return nullptr;
     
     return std::make_unique<WhileNode>(std::move(condition), std::move(body));
@@ -570,42 +618,6 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
     }
     
     return params;
-}
-
-std::unique_ptr<ASTnode> parseLogicOr() {
-    auto left = parseLogicAnd();
-    if (!left) return nullptr;
-    return parseLogicOrPrime(std::move(left));
-}
-
-std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
-    if (CurTok.type == OR) {
-        getNextToken();
-        auto right = parseLogicAnd();
-        if (!right) return nullptr;
-        return parseLogicOrPrime(
-            std::make_unique<BinaryOpNode>("||", std::move(left), std::move(right))
-        );
-    }
-    return left;
-}
-
-std::unique_ptr<ASTnode> parseLogicAnd() {
-    auto left = parseEquality();
-    if (!left) return nullptr;
-    return parseLogicAndPrime(std::move(left));
-}
-
-std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
-    if (CurTok.type == AND) {
-        getNextToken();
-        auto right = parseEquality();
-        if (!right) return nullptr;
-        return parseLogicAndPrime(
-            std::make_unique<BinaryOpNode>("&&", std::move(left), std::move(right))
-        );
-    }
-    return left;
 }
 
 std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgs() {
