@@ -743,6 +743,14 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParamListPr
     return params;
 }
 std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgList() {
+    debugPrint("parseArgList");
+
+    // Handle epsilon production for args ::= epsilon
+    if (CurTok.type == RPAR) {
+        return std::vector<std::unique_ptr<ASTnode>>();
+    }
+    
+    // Otherwise parse arg_list
     std::vector<std::unique_ptr<ASTnode>> args;
     
     auto firstArg = parseExpr();
