@@ -37,6 +37,12 @@ std::unique_ptr<DeclListNode> parseDeclList();
 std::unique_ptr<DeclListNode> parseDeclListPrime();
 std::unique_ptr<ASTnode> parseLogicOr();
 std::unique_ptr<ASTnode> parseLogicAnd();
+std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left);
+std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left);
+std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left);
+std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left);
+std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left);
+std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left);
 
 // Helper functions
 std::string parseTypeSpec();
