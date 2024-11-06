@@ -23,10 +23,13 @@ run_tests() {
   while true; do
     list_tests
 
-    echo -n "Enter the number of the test you want to run: "
+    echo -n "Enter the number of the test you want to run (or 'q' to quit): "
     read -r choice
 
-    if [[ "$choice" -gt 0 && "$choice" -le "${#tests[@]}" ]]; then
+    if [[ "$choice" == "q" ]]; then
+      echo "Exiting."
+      break
+    elif [[ "$choice" -gt 0 && "$choice" -le "${#tests[@]}" ]]; then
       selected_test="${tests[$((choice - 1))]}"
       
       if [[ "$selected_test" == "all" ]]; then

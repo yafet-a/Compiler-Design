@@ -60,11 +60,11 @@ std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgList();
 std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgListPrime(
     std::vector<std::unique_ptr<ASTnode>>&& args);
 
-// Add these declarations:
 std::unique_ptr<DeclListNode> parseLocalDecls();
 std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<ASTnode>>&& decls);
 std::vector<std::unique_ptr<ASTnode>> parseStmtList();
 std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique_ptr<ASTnode>>&& stmts);
+
 // First sets
 extern std::unordered_set<int> FIRST_program;
 extern std::unordered_set<int> FIRST_decl;

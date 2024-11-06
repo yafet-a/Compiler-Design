@@ -1,4 +1,4 @@
-program ::= extern_list decl_list
+program ::= extern_list decl_list 
           | decl_list
 
 extern_list ::= extern extern_list'
@@ -29,8 +29,9 @@ params ::= param_list
          | "void"
          | epsilon
 
-param_list ::= param_list "," param
-             | param
+param_list ::= param param_list'
+param_list' ::= "," param param_list' 
+              | epsilon
 
 param ::= var_type IDENT
 
@@ -65,7 +66,7 @@ return_stmt ::= "return" ";"
 
 expr ::= assign_expr
 
-assign_expr ::= IDENT "=" assign_expr
+assign_expr ::= IDENT "=" assign_expr  
               | logic_or
 
 logic_or ::= logic_and logic_or'
@@ -105,6 +106,6 @@ primary ::= "(" expr ")"
 args ::= arg_list
        | epsilon
 
-arg_  list ::= expr arg_list'
+arg_list ::= expr arg_list'
 arg_list' ::= "," expr arg_list'
             | epsilon
