@@ -772,13 +772,15 @@ std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgListPrime(
     return args;  // epsilon production
 }
 
-void parser() {
+std::unique_ptr<ASTnode> parser() {
     debugPrint("parser");
     auto program = parseProgram();
     if (program) {
         std::cout << "Parsing Finished\n";
         std::cout << program->to_string();
+        return program; // Return the AST
     } else {
         std::cerr << "Parsing failed\n";
+        return nullptr;
     }
 }

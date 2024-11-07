@@ -72,6 +72,6 @@ extern std::unordered_set<int> FIRST_extern;
 extern std::unordered_set<int> FIRST_type_spec;
 extern std::unordered_set<int> FIRST_expr;
 
-void parser();
+std::unique_ptr<ASTnode> parser();
 
 #endif // PARSER_H

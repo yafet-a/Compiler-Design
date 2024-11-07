@@ -1,23 +1,3 @@
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetOptions.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -45,9 +25,13 @@ using namespace llvm::sys;
 // Code Generation
 //===----------------------------------------------------------------------===//
 
-LLVMContext TheContext;
-IRBuilder<> Builder(TheContext);
-std::unique_ptr<Module> TheModule;
+llvm::LLVMContext TheContext;
+llvm::IRBuilder<> Builder(TheContext);
+std::unique_ptr<llvm::Module> TheModule;
+
+std::map<std::string, VariableInfo> NamedValues;
+std::map<std::string, VariableInfo> GlobalNamedValues;
+
 
 //===----------------------------------------------------------------------===//
 // AST Printer
@@ -64,49 +48,56 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 //===----------------------------------------------------------------------===//
 
 int main(int argc, char **argv) {
-  if (argc == 2) {
-    pFile = fopen(argv[1], "r");
-    if (pFile == NULL)
-      perror("Error opening file");
-  } else {
-    std::cout << "Usage: ./code InputFile\n";
-    return 1;
-  }
+    if (argc == 2) {
+        pFile = fopen(argv[1], "r");
+        if (pFile == NULL) {
+            perror("Error opening file");
+            return 1;
+        }
+    } else {
+        std::cout << "Usage: ./code InputFile\n";
+        return 1;
+    }
 
-  // initialize line number and column numbers to zero
-  lineNo = 1;
-  columnNo = 1;
+    // Initialize line number and column numbers
+    lineNo = 1;
+    columnNo = 1;
 
-  // // get the first token
-  getNextToken();
-  // while (CurTok.type != EOF_TOK) {
-  //   fprintf(stderr, "Token: %s with type %d\n", CurTok.lexeme.c_str(),
-  //           CurTok.type);
-  //   getNextToken();
-  // }
-  // fprintf(stderr, "Lexer Finished\n");
+    // Get the first token
+    getNextToken();
 
-  // Make the module, which holds all the code.
-  TheModule = std::make_unique<Module>("mini-c", TheContext);
+    // Make the module, which holds all the code
+    TheModule = std::make_unique<Module>("mini-c", TheContext);
+    
+    // Set up the module target triple
+    TheModule->setTargetTriple(llvm::sys::getDefaultTargetTriple());
 
-  // Run the parser now.
-  parser();
-  fprintf(stderr, "Parsing Finished\n");
+    // Run the parser and get the AST
+    auto ast = parser();
+    if (!ast) {
+        llvm::errs() << "Failed to generate AST\n";
+        return 1;
+    }
 
-  //********************* Start printing final IR **************************
-  // Print out all of the generated code into a file called output.ll
-  auto Filename = "output.ll";
-  std::error_code EC;
-  raw_fd_ostream dest(Filename, EC, sys::fs::OF_None);
+    // Generate code from the AST
+    if (!ast->codegen()) {
+        llvm::errs() << "Failed to generate LLVM IR\n";
+        return 1;
+    }
 
-  if (EC) {
-    errs() << "Could not open file: " << EC.message();
-    return 1;
-  }
-  // TheModule->print(errs(), nullptr); // print IR to terminal
-  TheModule->print(dest, nullptr);
-  //********************* End printing final IR ****************************
+    // Print out the IR
+    auto Filename = "output.ll";
+    std::error_code EC;
+    raw_fd_ostream dest(Filename, EC, sys::fs::OF_None);
 
-  fclose(pFile); // close the file that contains the code that was parsed
-  return 0;
+    if (EC) {
+        errs() << "Could not open file: " << EC.message();
+        return 1;
+    }
+
+    // Print IR to output.ll
+    TheModule->print(dest, nullptr);
+
+    fclose(pFile);
+    return 0;
 }
