@@ -208,16 +208,6 @@ std::string DeclListNode::to_string(int indent, bool isLast) const {
     return result;
 }
 
-
-// Helper function for creating allocas
-llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
-                                        const std::string &VarName,
-                                        llvm::Type *VarType) {
-    llvm::IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                          TheFunction->getEntryBlock().begin());
-    return TmpB.CreateAlloca(VarType, nullptr, VarName);
-}
-
 // ProgramNode
 Value* ProgramNode::codegen() {
     std::cerr << "Generating code for ProgramNode\n";
@@ -281,11 +271,35 @@ Value* VarDeclNode::codegen() {
         return nullptr;
     }
 
-    llvm::Function* TheFunction = Builder.GetInsertBlock()->getParent();
-    llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
+    // Check if we're in a function context
+    llvm::Function* TheFunction = Builder.GetInsertBlock() ? Builder.GetInsertBlock()->getParent() : nullptr;
 
-    NamedValues[name] = { Alloca, varType };  // Store both the allocation and the type
-    return Alloca;
+    if (TheFunction) {
+        // Local variable
+        llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
+        NamedValues[name] = { Alloca, varType, false };  // Store value, type, and global flag
+        return Alloca;
+    } else {
+        // Global variable
+        // Check if global variable already exists
+        if (TheModule->getGlobalVariable(name)) {
+            std::cerr << "Error: Global variable " << name << " already declared\n";
+            return nullptr;
+        }
+
+        // Create global variable
+        llvm::GlobalVariable* GlobalVar = new llvm::GlobalVariable(
+            *TheModule,
+            varType,
+            false, // isConstant
+            llvm::GlobalValue::ExternalLinkage,
+            llvm::Constant::getNullValue(varType), // initializer
+            name
+        );
+
+        GlobalNamedValues[name] = { GlobalVar, varType, true };
+        return GlobalVar;
+    }
 }
 
 
@@ -425,7 +439,62 @@ Value* IfNode::codegen() {
 
 // WhileNode
 Value* WhileNode::codegen() {
-    return nullptr;
+    std::cerr << "Generating code for WhileNode\n";
+    
+    Function *TheFunction = Builder.GetInsertBlock()->getParent();
+
+    // Create basic blocks for the loop
+    BasicBlock *HeaderBB = BasicBlock::Create(TheContext, "while.header", TheFunction);
+    BasicBlock *BodyBB = BasicBlock::Create(TheContext, "while.body");
+    BasicBlock *ExitBB = BasicBlock::Create(TheContext, "while.exit");
+
+    // Branch from the current block to the header
+    Builder.CreateBr(HeaderBB);
+
+    // Emit the header block
+    Builder.SetInsertPoint(HeaderBB);
+    Value *CondV = condition->codegen();
+    if (!CondV) {
+        std::cerr << "Error: Failed to generate code for while condition\n";
+        return nullptr;
+    }
+
+    // Convert condition to bool if necessary (for C-style conditions)
+    if (!CondV->getType()->isIntegerTy(1)) {
+        if (CondV->getType()->isIntegerTy()) {
+            // Compare with 0 to convert to bool
+            CondV = Builder.CreateICmpNE(
+                CondV, 
+                ConstantInt::get(CondV->getType(), 0),
+                "while.cond"
+            );
+        } else {
+            std::cerr << "Error: While condition must be convertible to bool\n";
+            return nullptr;
+        }
+    }
+
+    // Add the body block to the function
+    TheFunction->insert(TheFunction->end(), BodyBB);
+
+    // Create conditional branch
+    Builder.CreateCondBr(CondV, BodyBB, ExitBB);
+
+    // Emit the body block
+    Builder.SetInsertPoint(BodyBB);
+    if (!body->codegen()) {
+        std::cerr << "Error: Failed to generate code for while body\n";
+        return nullptr;
+    }
+
+    // Create branch back to header block
+    Builder.CreateBr(HeaderBB);
+
+    // Add the exit block to the function
+    TheFunction->insert(TheFunction->end(), ExitBB);
+    Builder.SetInsertPoint(ExitBB);
+
+    return Constant::getNullValue(Type::getInt32Ty(TheContext));
 }
 
 // ReturnNode
@@ -462,57 +531,91 @@ Value* BinaryOpNode::codegen() {
         return nullptr;
     }
 
-    // Debug output for operand types
     llvm::errs() << "Left operand type: " << *L->getType() << "\n";
     llvm::errs() << "Right operand type: " << *R->getType() << "\n";
 
-    // Ensure both operands are integers
-    if (L->getType()->isIntegerTy() && R->getType()->isIntegerTy()) {
-        // Promote operands to the larger type if necessary
-        llvm::Type* commonType = L->getType();
+    // Determine if we're dealing with floating point
+    bool isFloating = L->getType()->isFloatTy() || R->getType()->isFloatTy();
 
+    // Convert types if needed
+    if (isFloating) {
+        if (L->getType()->isIntegerTy()) {
+            L = Builder.CreateSIToFP(L, Type::getFloatTy(TheContext), "float_cast");
+        }
+        if (R->getType()->isIntegerTy()) {
+            R = Builder.CreateSIToFP(R, Type::getFloatTy(TheContext), "float_cast");
+        }
+    } else {
+        // For integers, ensure consistent bit width
         if (L->getType() != R->getType()) {
-            // Decide which type to promote to
             if (L->getType()->getIntegerBitWidth() > R->getType()->getIntegerBitWidth()) {
                 R = Builder.CreateIntCast(R, L->getType(), true, "cast");
-                commonType = L->getType();
             } else {
                 L = Builder.CreateIntCast(L, R->getType(), true, "cast");
-                commonType = R->getType();
             }
         }
+    }
 
-        // Perform the operation
-        if (op == "+")
-            return Builder.CreateAdd(L, R, "addtmp");
-        if (op == "-")
-            return Builder.CreateSub(L, R, "subtmp");
-        if (op == "*")
-            return Builder.CreateMul(L, R, "multmp");
-        if (op == "/")
-            return Builder.CreateSDiv(L, R, "divtmp");
-        if (op == "%")
-            return Builder.CreateSRem(L, R, "modtmp");
-        if (op == "<")
-            return Builder.CreateICmpSLT(L, R, "cmptmp");
-        if (op == ">")
-            return Builder.CreateICmpSGT(L, R, "cmptmp");
-        if (op == "<=")
-            return Builder.CreateICmpSLE(L, R, "cmptmp");
-        if (op == ">=")
-            return Builder.CreateICmpSGE(L, R, "cmptmp");
-        if (op == "==")
-            return Builder.CreateICmpEQ(L, R, "eqtmp");
-        if (op == "!=")
-            return Builder.CreateICmpNE(L, R, "netmp");
-        if (op == "&&")
-            return Builder.CreateAnd(L, R, "andtmp");
-        if (op == "||")
-            return Builder.CreateOr(L, R, "ortmp");
+    // Map operators to LLVM instructions
+    if (op == "+" || op == "-" || op == "*" || op == "/") {
+        Instruction::BinaryOps binOp;
+        
+        if (isFloating) {
+            if (op == "+") binOp = Instruction::FAdd;
+            else if (op == "-") binOp = Instruction::FSub;
+            else if (op == "*") binOp = Instruction::FMul;
+            else if (op == "/") binOp = Instruction::FDiv;
+            else return nullptr;
+        } else {
+            if (op == "+") binOp = Instruction::Add;
+            else if (op == "-") binOp = Instruction::Sub;
+            else if (op == "*") binOp = Instruction::Mul;
+            else if (op == "/") binOp = Instruction::SDiv;
+            else return nullptr;
+        }
+        
+        return Builder.CreateBinOp(binOp, L, R, "binop");
+    }
+    
+    // Handle comparisons
+    if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=") {
+        if (isFloating) {
+            CmpInst::Predicate pred;
+            if (op == "<") pred = CmpInst::FCMP_OLT;
+            else if (op == ">") pred = CmpInst::FCMP_OGT;
+            else if (op == "<=") pred = CmpInst::FCMP_OLE;
+            else if (op == ">=") pred = CmpInst::FCMP_OGE;
+            else if (op == "==") pred = CmpInst::FCMP_OEQ;
+            else if (op == "!=") pred = CmpInst::FCMP_ONE;
+            else return nullptr;
+            
+            return Builder.CreateFCmp(pred, L, R, "fcmp");
+        } else {
+            CmpInst::Predicate pred;
+            if (op == "<") pred = CmpInst::ICMP_SLT;
+            else if (op == ">") pred = CmpInst::ICMP_SGT;
+            else if (op == "<=") pred = CmpInst::ICMP_SLE;
+            else if (op == ">=") pred = CmpInst::ICMP_SGE;
+            else if (op == "==") pred = CmpInst::ICMP_EQ;
+            else if (op == "!=") pred = CmpInst::ICMP_NE;
+            else return nullptr;
+            
+            return Builder.CreateICmp(pred, L, R, "icmp");
+        }
+    }
 
-    } else {
-        std::cerr << "Error: Unsupported operand types for operator " << op << "\n";
-        return nullptr;
+    // Handle logical operators
+    if (op == "&&" || op == "||") {
+        // Convert operands to bool if needed
+        if (!L->getType()->isIntegerTy(1)) {
+            L = Builder.CreateICmpNE(L, ConstantInt::get(L->getType(), 0), "tobool");
+        }
+        if (!R->getType()->isIntegerTy(1)) {
+            R = Builder.CreateICmpNE(R, ConstantInt::get(R->getType(), 0), "tobool");
+        }
+
+        if (op == "&&") return Builder.CreateAnd(L, R, "and");
+        if (op == "||") return Builder.CreateOr(L, R, "or");
     }
 
     std::cerr << "Error: Unknown binary operator: " << op << "\n";
@@ -521,6 +624,37 @@ Value* BinaryOpNode::codegen() {
 
 // UnaryOpNode
 Value* UnaryOpNode::codegen() {
+    std::cerr << "Generating code for UnaryOpNode: " << op << "\n";
+    Value* Val = operand->codegen();
+    if (!Val) {
+        std::cerr << "Error: Failed to generate code for operand\n";
+        return nullptr;
+    }
+
+    if (op == "!") {
+        // Handle boolean negation
+        if (Val->getType()->isIntegerTy(1)) {
+            // Direct boolean negation
+            return Builder.CreateNot(Val, "nottmp");
+        } else if (Val->getType()->isIntegerTy()) {
+            // Convert integer to bool first (0 = false, non-0 = true)
+            Value* BoolVal = Builder.CreateICmpNE(
+                Val, 
+                ConstantInt::get(Val->getType(), 0), 
+                "booltmp"
+            );
+            return Builder.CreateNot(BoolVal, "nottmp");
+        }
+    } else if (op == "-") {
+        // Handle numeric negation
+        if (Val->getType()->isFloatTy()) {
+            return Builder.CreateFNeg(Val, "negtmp");
+        } else if (Val->getType()->isIntegerTy()) {
+            return Builder.CreateNeg(Val, "negtmp");
+        }
+    }
+
+    std::cerr << "Error: Invalid unary operator or operand type\n";
     return nullptr;
 }
 
@@ -541,47 +675,43 @@ Value* AssignNode::codegen() {
     }
 
     if (!varInfo) {
-        std::cerr << "Error: Variable not found: " << name << "\n";
+        std::cerr << "Error: Unknown variable " << name << "\n";
         return nullptr;
     }
 
-    llvm::Type* varType = varInfo->type;
-    llvm::Value* allocaInst = varInfo->allocaInst;
-
-    // Ensure the types match
-    if (varType != Val->getType()) {
-        std::cerr << "Error: Type mismatch in assignment to variable " << name << "\n";
-        return nullptr;
+    // Type checking and conversion
+    if (Val->getType() != varInfo->type) {
+        if (varInfo->type->isFloatTy() && Val->getType()->isIntegerTy()) {
+            Val = Builder.CreateSIToFP(Val, varInfo->type, "conv");
+        } else {
+            std::cerr << "Error: Invalid type conversion\n";
+            return nullptr;
+        }
     }
 
-    // Use CreateStore with explicit type
-    Builder.CreateStore(Val, allocaInst);
+    Builder.CreateStore(Val, varInfo->value);
     return Val;
 }
 
 // VariableNode
 Value* VariableNode::codegen() {
     std::cerr << "Generating code for VariableNode: " << name << "\n";
-    VariableInfo* varInfo = nullptr;
+    
+    // First check local variables
     if (NamedValues.find(name) != NamedValues.end()) {
-        varInfo = &NamedValues[name];
-    } else if (GlobalNamedValues.find(name) != GlobalNamedValues.end()) {
-        varInfo = &GlobalNamedValues[name];
+        VariableInfo& varInfo = NamedValues[name];
+        return Builder.CreateLoad(varInfo.type, varInfo.value, name.c_str());
+    }
+    
+    // Then check global variables
+    if (GlobalNamedValues.find(name) != GlobalNamedValues.end()) {
+        VariableInfo& varInfo = GlobalNamedValues[name];
+        return Builder.CreateLoad(varInfo.type, varInfo.value, name.c_str());
     }
 
-    if (!varInfo) {
-        std::cerr << "Error: Variable not found: " << name << "\n";
-        return nullptr;
-    }
-
-    llvm::Type* varType = varInfo->type;
-    llvm::Value* allocaInst = varInfo->allocaInst;
-
-    // Use CreateLoad with explicit type
-    return Builder.CreateLoad(varType, allocaInst, name);
+    std::cerr << "Error: Unknown variable " << name << "\n";
+    return nullptr;
 }
-
-
 
 // FunctionCallNode
 Value* FunctionCallNode::codegen() {
@@ -629,8 +759,6 @@ Value* LiteralNode::codegen() {
             return nullptr;
     }
 }
-
-
 
 Value* ExternListNode::codegen() {
     for (const auto& ext : externs) {

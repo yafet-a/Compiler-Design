@@ -34,16 +34,15 @@ extern std::unique_ptr<llvm::Module> TheModule;
 
 // Symbol tables
 struct VariableInfo {
-    llvm::AllocaInst* allocaInst;
+    llvm::Value* value;  // Can be either AllocaInst* or GlobalVariable*
     llvm::Type* type;
+    bool isGlobal;
 };
 
 extern std::map<std::string, VariableInfo> NamedValues;    // Local variables
 extern std::map<std::string, VariableInfo> GlobalNamedValues;   // Global variables
 
-
-
-// Helper functions
+// Helper function declarations
 inline llvm::Type* getTypeFromStr(const std::string& type) {
     if (type == "int") return llvm::Type::getInt32Ty(TheContext);
     if (type == "float") return llvm::Type::getFloatTy(TheContext);
@@ -52,11 +51,11 @@ inline llvm::Type* getTypeFromStr(const std::string& type) {
     return nullptr;
 }
 
+// Function declarations
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction, 
                                         const std::string &VarName,
                                         llvm::Type *VarType);
 
-// Type conversion helpers
 llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType);
 
 #endif
