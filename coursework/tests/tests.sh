@@ -11,18 +11,14 @@ DIR="$(pwd)"
 
 ### Build mccomp compiler
 echo "Cleanup *****"
-rm -rf build bin
+rm -rf ./mccomp
 
 echo "Compile *****"
 
-# Change to the root directory of the repository
-cd "$(dirname "$0")/.."
-
 make clean
-make
+make -j mccomp
 
-# Update COMP variable to reflect the correct path to mccomp
-COMP="$(pwd)/bin/mccomp"
+COMP=$DIR/mccomp
 echo $COMP
 
 function validate {
@@ -33,131 +29,69 @@ function validate {
   rc=$?; if [[ $rc != 0 ]]; then echo "TEST FAILED *****"; exit $rc; fi; rm perf_out
 }
 
-echo "Test *****"
+function run_test {
+  local test_dir=$1
+  local test_name=$2
+  local test_exec=$3
 
-addition=1
-factorial=1
-fibonacci=1
-pi=1
-while=1
-void=1
-cosine=1
-unary=1
-palindrome=1
-recurse=1
-rfact=1
+  cd $test_dir
+  pwd
+  rm -rf output.ll $test_exec
+  "$COMP" ./$test_name.c
+  $CLANG driver.cpp output.ll -o $test_exec
+  validate "./$test_exec"
+  cd $DIR
+}
 
-cd tests/addition/
+function list_options {
+  echo "Select a test to run:"
+  echo "1) addition"
+  echo "2) factorial"
+  echo "3) fibonacci"
+  echo "4) pi"
+  echo "5) while"
+  echo "6) void"
+  echo "7) cosine"
+  echo "8) unary"
+  echo "9) recurse"
+  echo "10) rfact"
+  echo "11) palindrome"
+  echo "12) Run all tests"
+  echo "q) Quit"
+}
 
-if [ $addition == 1 ]
-then	
-    cd ../addition/
-    pwd
-    rm -rf output.ll add
-    "$COMP" ./addition.c
-    $CLANG driver.cpp output.ll -o add
-    validate "./add"
-fi
+function run_all_tests {
+  run_test "tests/addition" "addition" "add"
+  run_test "tests/factorial" "factorial" "fact"
+  run_test "tests/fibonacci" "fibonacci" "fib"
+  run_test "tests/pi" "pi" "pi"
+  run_test "tests/while" "while" "while"
+  run_test "tests/void" "void" "void"
+  run_test "tests/cosine" "cosine" "cosine"
+  run_test "tests/unary" "unary" "unary"
+  run_test "tests/recurse" "recurse" "recurse"
+  run_test "tests/rfact" "rfact" "rfact"
+  run_test "tests/palindrome" "palindrome" "palindrome"
+}
 
+while true; do
+  list_options
+  read -p "Enter your choice: " choice
 
-if [ $factorial == 1 ];
-then	
-    cd ../factorial
-    pwd
-    rm -rf output.ll fact
-    "$COMP" ./factorial.c
-    $CLANG driver.cpp output.ll -o fact
-    validate "./fact"
-fi
-
-if [ $fibonacci == 1 ];
-then	
-    cd ../fibonacci
-    pwd
-    rm -rf output.ll fib
-    "$COMP" ./fibonacci.c
-    $CLANG driver.cpp output.ll -o fib
-    validate "./fib"
-fi
-
-if [ $pi == 1 ];
-then	
-    cd ../pi
-    pwd
-    rm -rf output.ll pi
-    "$COMP" ./pi.c
-    $CLANG driver.cpp output.ll -o pi
-    validate "./pi"
-fi
-
-if [ $while == 1 ];
-then	
-    cd ../while
-    pwd
-    rm -rf output.ll while
-    "$COMP" ./while.c
-    $CLANG driver.cpp output.ll -o while
-    validate "./while"
-fi
-
-if [ $void == 1 ];
-then	
-    cd ../void
-    pwd
-    rm -rf output.ll void
-    "$COMP" ./void.c 
-    $CLANG driver.cpp output.ll -o void
-    validate "./void"
-fi
-
-if [ $cosine == 1 ];
-then	
-    cd ../cosine
-    pwd
-    rm -rf output.ll cosine
-    "$COMP" ./cosine.c
-    $CLANG driver.cpp output.ll -o cosine
-    validate "./cosine"
-fi
-
-if [ $unary == 1 ];
-then	
-    cd ../unary
-    pwd
-    rm -rf output.ll unary
-    "$COMP" ./unary.c
-    $CLANG driver.cpp output.ll -o unary
-    validate "./unary"
-fi
-
-if [ $recurse == 1 ];
-then	
-    cd ../recurse
-    pwd
-    rm -rf output.ll recurse
-    "$COMP" ./recurse.c
-    $CLANG driver.cpp output.ll -o recurse
-    validate "./recurse"
-fi
-
-if [ $rfact == 1 ];
-then	
-    cd ../rfact
-    pwd
-    rm -rf output.ll rfact
-    "$COMP" ./rfact.c
-    $CLANG driver.cpp output.ll -o rfact
-    validate "./rfact"
-fi
-
-if [ $palindrome == 1 ];
-then	
-    cd ../palindrome
-    pwd
-    rm -rf output.ll palindrome
-    "$COMP" ./palindrome.c
-    $CLANG driver.cpp output.ll -o palindrome
-    validate "./palindrome"
-fi
-
-echo "***** ALL TESTS PASSED *****"
+  case $choice in
+    1) run_test "tests/addition" "addition" "add" ;;
+    2) run_test "tests/factorial" "factorial" "fact" ;;
+    3) run_test "tests/fibonacci" "fibonacci" "fib" ;;
+    4) run_test "tests/pi" "pi" "pi" ;;
+    5) run_test "tests/while" "while" "while" ;;
+    6) run_test "tests/void" "void" "void" ;;
+    7) run_test "tests/cosine" "cosine" "cosine" ;;
+    8) run_test "tests/unary" "unary" "unary" ;;
+    9) run_test "tests/recurse" "recurse" "recurse" ;;
+    10) run_test "tests/rfact" "rfact" "rfact" ;;
+    11) run_test "tests/palindrome" "palindrome" "palindrome" ;;
+    12) run_all_tests ;;
+    q) echo "Exiting."; exit 0 ;;
+    *) echo "Invalid choice. Please try again." ;;
+  esac
+done
