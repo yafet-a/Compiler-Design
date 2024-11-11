@@ -1,0 +1,1 @@
+extern int entry(int i) { return 1; }
