@@ -276,9 +276,17 @@ Value* VarDeclNode::codegen() {
 
     if (TheFunction) {
         // Local variable
-        llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
-        NamedValues[name] = { Alloca, varType, false };  // Store value, type, and global flag
-        return Alloca;
+        // Check if variable already exists in current scope
+        if (NamedValues.find(name) != NamedValues.end()) {
+            // Allow shadowing of outer scope variables
+            llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
+            NamedValues[name] = { Alloca, varType, false };
+            return Alloca;
+        } else {
+            llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
+            NamedValues[name] = { Alloca, varType, false };
+            return Alloca;
+        }
     } else {
         // Global variable
         // Check if global variable already exists
@@ -373,26 +381,40 @@ Value* BlockNode::codegen() {
     std::cerr << "Generating code for BlockNode\n";
     Value* Last = nullptr;
     
+    // Save the current scope
+    std::map<std::string, VariableInfo> OldNamedValues = NamedValues;
+    
+    // Generate code for declarations in new scope
     for (const auto& decl : declarations) {
         Last = decl->codegen();
         if (!Last) {
             std::cerr << "Error: Failed to generate code for declaration\n";
+            NamedValues = OldNamedValues;  // Restore scope before error return
             return nullptr;
         }
     }
     
+    // Generate code for statements
     for (const auto& stmt : statements) {
         Last = stmt->codegen();
         if (!Last) {
             std::cerr << "Error: Failed to generate code for statement\n";
+            NamedValues = OldNamedValues;  // Restore scope before error return
             return nullptr;
         }
+        
+        // If block is terminated (e.g., by a return), stop generating more code
+        if (Builder.GetInsertBlock()->getTerminator())
+            break;
     }
+    
+    // Restore the previous scope
+    NamedValues = OldNamedValues;
     
     return Last;
 }
 
-// IfNode
+// IfNode modification
 Value* IfNode::codegen() {
     std::cerr << "Generating code for IfNode\n";
     Value *CondV = condition->codegen();
@@ -401,14 +423,35 @@ Value* IfNode::codegen() {
         return nullptr;
     }
 
+    // Convert condition to bool using convertToType with conditional context
+    if (!CondV->getType()->isIntegerTy(1)) {
+        CondV = convertToType(CondV, llvm::Type::getInt1Ty(TheContext), true);
+        if (!CondV) {
+            std::cerr << "Error: Failed to convert condition to bool\n";
+            return nullptr;
+        }
+    }
+
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
     
     // Create blocks
     BasicBlock *ThenBB = BasicBlock::Create(TheContext, "then", TheFunction);
-    BasicBlock *ElseBB = BasicBlock::Create(TheContext, "else");
     BasicBlock *MergeBB = BasicBlock::Create(TheContext, "ifcont");
     
-    Builder.CreateCondBr(CondV, ThenBB, ElseBB);
+    // Create else block only if we have an else statement
+    BasicBlock *ElseBB = nullptr;
+    if (elseBlock) {
+        ElseBB = BasicBlock::Create(TheContext, "else");
+    }
+
+    // Insert MergeBB and ElseBB (if it exists) before creating branches
+    if (elseBlock) {
+        ElseBB->insertInto(TheFunction);
+    }
+    MergeBB->insertInto(TheFunction);
+    
+    // Create conditional branch
+    Builder.CreateCondBr(CondV, ThenBB, ElseBB ? ElseBB : MergeBB);
     
     // Emit then block
     Builder.SetInsertPoint(ThenBB);
@@ -417,27 +460,32 @@ Value* IfNode::codegen() {
         std::cerr << "Error: Failed to generate code for then block\n";
         return nullptr;
     }
-    Builder.CreateBr(MergeBB);
-    
-    // Emit else block
-    // Use insert method instead of accessing list directly
-    TheFunction->insert(TheFunction->end(), ElseBB);
-    Builder.SetInsertPoint(ElseBB);
-    Value *ElseV = elseBlock->codegen();
-    if (!ElseV) {
-        std::cerr << "Error: Failed to generate code for else block\n";
-        return nullptr;
+    // Add branch to merge block if it doesn't already have a terminator
+    if (!Builder.GetInsertBlock()->getTerminator()) {
+        Builder.CreateBr(MergeBB);
     }
-    Builder.CreateBr(MergeBB);
     
-    // Emit merge block
-    TheFunction->insert(TheFunction->end(), MergeBB);
+    // Emit else block if it exists
+    if (elseBlock) {
+        Builder.SetInsertPoint(ElseBB);
+        Value *ElseV = elseBlock->codegen();
+        if (!ElseV) {
+            std::cerr << "Error: Failed to generate code for else block\n";
+            return nullptr;
+        }
+        // Add branch to merge block if it doesn't already have a terminator
+        if (!Builder.GetInsertBlock()->getTerminator()) {
+            Builder.CreateBr(MergeBB);
+        }
+    }
+    
+    // Set insert point to merge block
     Builder.SetInsertPoint(MergeBB);
     
     return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0));
 }
 
-// WhileNode
+// WhileNode modification
 Value* WhileNode::codegen() {
     std::cerr << "Generating code for WhileNode\n";
     
@@ -474,8 +522,9 @@ Value* WhileNode::codegen() {
         }
     }
 
-    // Add the body block to the function
-    TheFunction->insert(TheFunction->end(), BodyBB);
+    // Add both BodyBB and ExitBB to the function before creating the conditional branch
+    BodyBB->insertInto(TheFunction);
+    ExitBB->insertInto(TheFunction);
 
     // Create conditional branch
     Builder.CreateCondBr(CondV, BodyBB, ExitBB);
@@ -487,11 +536,12 @@ Value* WhileNode::codegen() {
         return nullptr;
     }
 
-    // Create branch back to header block
-    Builder.CreateBr(HeaderBB);
+    // Create branch back to header block if the block isn't already terminated
+    if (!Builder.GetInsertBlock()->getTerminator()) {
+        Builder.CreateBr(HeaderBB);
+    }
 
-    // Add the exit block to the function
-    TheFunction->insert(TheFunction->end(), ExitBB);
+    // Move to exit block
     Builder.SetInsertPoint(ExitBB);
 
     return Constant::getNullValue(Type::getInt32Ty(TheContext));
@@ -503,6 +553,19 @@ Value* ReturnNode::codegen() {
     if (value) {
         RetVal = value->codegen();
         if (!RetVal) return nullptr;
+
+        // Get function's return type
+        Function* TheFunction = Builder.GetInsertBlock()->getParent();
+        Type* RetType = TheFunction->getReturnType();
+
+        // If the return value type does not match the function's return type, convert it
+        if (RetVal && RetVal->getType() != RetType) {
+            RetVal = convertToType(RetVal, RetType);
+            if (!RetVal) {
+                std::cerr << "Error: Invalid type conversion in return\n";
+                return nullptr;
+            }
+        }
     }
     
     return Builder.CreateRet(RetVal);
@@ -534,93 +597,88 @@ Value* BinaryOpNode::codegen() {
     llvm::errs() << "Left operand type: " << *L->getType() << "\n";
     llvm::errs() << "Right operand type: " << *R->getType() << "\n";
 
-    bool isFloating = L->getType()->isFloatTy() || R->getType()->isFloatTy();
+    // Special handling for logical operators
+    if (op == "&&" || op == "||") {
+        // Convert operands to bool if needed
+        if (!L->getType()->isIntegerTy(1)) {
+            L = convertToType(L, Type::getInt1Ty(TheContext));
+        }
+        if (!R->getType()->isIntegerTy(1)) {
+            R = convertToType(R, Type::getInt1Ty(TheContext));
+        }
+        if (!L || !R) return nullptr;
 
-    // Type conversion
-    if (isFloating) {
-        if (L->getType()->isIntegerTy()) {
-            L = Builder.CreateSIToFP(L, Type::getFloatTy(TheContext), "float_cast");
-        }
-        if (R->getType()->isIntegerTy()) {
-            R = Builder.CreateSIToFP(R, Type::getFloatTy(TheContext), "float_cast");
-        }
+        return (op == "&&") ? Builder.CreateAnd(L, R) : Builder.CreateOr(L, R);
     }
 
-    // 1. Highest precedence: multiply operators (*, /, %)
-    if (op == "*" || op == "/" || op == "%") {
-        if (isFloating) {
-            if (op == "*") return Builder.CreateFMul(L, R, "multmp");
-            if (op == "/") return Builder.CreateFDiv(L, R, "divtmp");
+    // For arithmetic operations
+    // If either operand is float, convert both to float
+    if (L->getType()->isFloatTy() || R->getType()->isFloatTy()) {
+        if (!L->getType()->isFloatTy()) {
+            L = convertToType(L, Type::getFloatTy(TheContext));
+        }
+        if (!R->getType()->isFloatTy()) {
+            R = convertToType(R, Type::getFloatTy(TheContext));
+        }
+        if (!L || !R) return nullptr;
+    }
+    // Otherwise if either is int32, convert both to int32
+    else if (L->getType()->isIntegerTy(32) || R->getType()->isIntegerTy(32)) {
+        if (!L->getType()->isIntegerTy(32)) {
+            L = convertToType(L, Type::getInt32Ty(TheContext));
+        }
+        if (!R->getType()->isIntegerTy(32)) {
+            R = convertToType(R, Type::getInt32Ty(TheContext));
+        }
+        if (!L || !R) return nullptr;
+    }
+
+    // Create the result based on operator
+    if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
+        if (L->getType()->isFloatTy()) {
             if (op == "%") {
                 std::cerr << "Error: Modulo not supported for floating point\n";
                 return nullptr;
             }
+            if (op == "+") return Builder.CreateFAdd(L, R, "addtmp");
+            if (op == "-") return Builder.CreateFSub(L, R, "subtmp");
+            if (op == "*") return Builder.CreateFMul(L, R, "multmp");
+            if (op == "/") return Builder.CreateFDiv(L, R, "divtmp");
         } else {
+            if (op == "+") return Builder.CreateAdd(L, R, "addtmp");
+            if (op == "-") return Builder.CreateSub(L, R, "subtmp");
             if (op == "*") return Builder.CreateMul(L, R, "multmp");
             if (op == "/") return Builder.CreateSDiv(L, R, "divtmp");
             if (op == "%") return Builder.CreateSRem(L, R, "modtmp");
         }
     }
 
-    // 2. Additive operators (+, -)
-    if (op == "+" || op == "-") {
-        if (isFloating) {
-            if (op == "+") return Builder.CreateFAdd(L, R, "addtmp");
-            if (op == "-") return Builder.CreateFSub(L, R, "subtmp");
-        } else {
-            if (op == "+") return Builder.CreateAdd(L, R, "addtmp");
-            if (op == "-") return Builder.CreateSub(L, R, "subtmp");
+    // Handle comparisons (==, !=, <, >, <=, >=)
+    if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") {
+        // For comparisons between booleans, leave them as bools
+        if (L->getType()->isIntegerTy(1) && R->getType()->isIntegerTy(1)) {
+            if (op == "==") return Builder.CreateICmpEQ(L, R, "eqtmp");
+            if (op == "!=") return Builder.CreateICmpNE(L, R, "neqtmp");
         }
-    }
 
-    // 3. Relational operators (<, <=, >, >=)
-    if (op == "<" || op == "<=" || op == ">" || op == ">=") {
+        // For other comparisons, do the usual type conversion
+        bool isFloating = L->getType()->isFloatTy() || R->getType()->isFloatTy();
+
         if (isFloating) {
             if (op == "<")  return Builder.CreateFCmpOLT(L, R, "cmptmp");
             if (op == "<=") return Builder.CreateFCmpOLE(L, R, "cmptmp");
             if (op == ">")  return Builder.CreateFCmpOGT(L, R, "cmptmp");
             if (op == ">=") return Builder.CreateFCmpOGE(L, R, "cmptmp");
+            if (op == "==") return Builder.CreateFCmpOEQ(L, R, "cmptmp");
+            if (op == "!=") return Builder.CreateFCmpONE(L, R, "cmptmp");
         } else {
             if (op == "<")  return Builder.CreateICmpSLT(L, R, "cmptmp");
             if (op == "<=") return Builder.CreateICmpSLE(L, R, "cmptmp");
             if (op == ">")  return Builder.CreateICmpSGT(L, R, "cmptmp");
             if (op == ">=") return Builder.CreateICmpSGE(L, R, "cmptmp");
+            if (op == "==") return Builder.CreateICmpEQ(L, R, "cmptmp");
+            if (op == "!=") return Builder.CreateICmpNE(L, R, "cmptmp");
         }
-    }
-
-    // 4. Equality operators (==, !=)
-    if (op == "==" || op == "!=") {
-        if (isFloating) {
-            if (op == "==") return Builder.CreateFCmpOEQ(L, R, "eqtmp");
-            if (op == "!=") return Builder.CreateFCmpONE(L, R, "neqtmp");
-        } else {
-            if (op == "==") return Builder.CreateICmpEQ(L, R, "eqtmp");
-            if (op == "!=") return Builder.CreateICmpNE(L, R, "neqtmp");
-        }
-    }
-
-    // 5. Logical AND
-    if (op == "&&") {
-        // Convert operands to bool if needed
-        if (!L->getType()->isIntegerTy(1)) {
-            L = Builder.CreateICmpNE(L, ConstantInt::get(L->getType(), 0), "tobool");
-        }
-        if (!R->getType()->isIntegerTy(1)) {
-            R = Builder.CreateICmpNE(R, ConstantInt::get(R->getType(), 0), "tobool");
-        }
-        return Builder.CreateAnd(L, R, "andtmp");
-    }
-
-    // 6. Logical OR
-    if (op == "||") {
-        // Convert operands to bool if needed
-        if (!L->getType()->isIntegerTy(1)) {
-            L = Builder.CreateICmpNE(L, ConstantInt::get(L->getType(), 0), "tobool");
-        }
-        if (!R->getType()->isIntegerTy(1)) {
-            R = Builder.CreateICmpNE(R, ConstantInt::get(R->getType(), 0), "tobool");
-        }
-        return Builder.CreateOr(L, R, "ortmp");
     }
 
     std::cerr << "Error: Unknown binary operator: " << op << "\n";
@@ -675,8 +733,10 @@ Value* AssignNode::codegen() {
     VariableInfo* varInfo = nullptr;
     if (NamedValues.find(name) != NamedValues.end()) {
         varInfo = &NamedValues[name];
+        std::cerr << "Found " << name << " in local scope\n";
     } else if (GlobalNamedValues.find(name) != GlobalNamedValues.end()) {
         varInfo = &GlobalNamedValues[name];
+        std::cerr << "Found " << name << " in global scope\n";
     }
 
     if (!varInfo) {
@@ -684,11 +744,10 @@ Value* AssignNode::codegen() {
         return nullptr;
     }
 
-    // Type checking and conversion
+    // Handle all type conversions through convertToType
     if (Val->getType() != varInfo->type) {
-        if (varInfo->type->isFloatTy() && Val->getType()->isIntegerTy()) {
-            Val = Builder.CreateSIToFP(Val, varInfo->type, "conv");
-        } else {
+        Val = convertToType(Val, varInfo->type);
+        if (!Val) {
             std::cerr << "Error: Invalid type conversion\n";
             return nullptr;
         }
