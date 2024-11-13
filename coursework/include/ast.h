@@ -9,8 +9,22 @@
 
 using namespace llvm;
 
+//Source location information for error messages
+struct SourceLocation {
+    std::string filename;
+    int line;
+    int column;
+    std::string lineContent;  // The actual line of code
+
+    SourceLocation(const std::string& fname = "", int l = 0, int c = 0, 
+                  const std::string& content = "")
+        : filename(fname), line(l), column(c), lineContent(content) {}
+};
+
 // Base AST node class
 class ASTnode {
+protected:
+    SourceLocation loc;
 public:
     virtual ~ASTnode() {}
     virtual Value* codegen() = 0;
@@ -47,7 +61,10 @@ protected:
 class TypeNode : public ASTnode {
     std::string typeName;
 public:
-    TypeNode(std::string typeName) : typeName(typeName) {}
+    TypeNode(std::string typeName, const SourceLocation& location = SourceLocation())
+        : typeName(typeName) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -58,8 +75,11 @@ class ProgramNode : public ASTnode {
     std::vector<std::unique_ptr<ASTnode>> declarations;
 public:
     ProgramNode(std::vector<std::unique_ptr<ASTnode>> exts, 
-                std::vector<std::unique_ptr<ASTnode>> decls)
-        : externs(std::move(exts)), declarations(std::move(decls)) {}
+                std::vector<std::unique_ptr<ASTnode>> decls,
+                const SourceLocation& location = SourceLocation())
+        : externs(std::move(exts)), declarations(std::move(decls)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -68,11 +88,14 @@ public:
 class ExternNode : public ASTnode {
     std::string type;
     std::string name;
-    std::vector<std::pair<std::string, std::string>> params; // (type, name) pairs
+    std::vector<std::pair<std::string, std::string>> params;
 public:
     ExternNode(std::string type, std::string name, 
-               std::vector<std::pair<std::string, std::string>> params)
-        : type(type), name(name), params(params) {}
+               std::vector<std::pair<std::string, std::string>> params,
+               const SourceLocation& location = SourceLocation())
+        : type(type), name(name), params(params) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -82,8 +105,11 @@ class VarDeclNode : public ASTnode {
     std::string type;
     std::string name;
 public:
-    VarDeclNode(std::string type, std::string name)
-        : type(type), name(name) {}
+    VarDeclNode(std::string type, std::string name,
+                const SourceLocation& location = SourceLocation())
+        : type(type), name(name) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -97,8 +123,11 @@ class FunctionNode : public ASTnode {
 public:
     FunctionNode(std::string returnType, std::string name,
                  std::vector<std::pair<std::string, std::string>> params,
-                 std::unique_ptr<ASTnode> body)
-        : returnType(returnType), name(name), params(params), body(std::move(body)) {}
+                 std::unique_ptr<ASTnode> body,
+                 const SourceLocation& location = SourceLocation())
+        : returnType(returnType), name(name), params(params), body(std::move(body)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -109,8 +138,11 @@ class BlockNode : public ASTnode {
     std::vector<std::unique_ptr<ASTnode>> statements;
 public:
     BlockNode(std::vector<std::unique_ptr<ASTnode>> decls,
-              std::vector<std::unique_ptr<ASTnode>> stmts)
-        : declarations(std::move(decls)), statements(std::move(stmts)) {}
+              std::vector<std::unique_ptr<ASTnode>> stmts,
+              const SourceLocation& location = SourceLocation())
+        : declarations(std::move(decls)), statements(std::move(stmts)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -119,23 +151,29 @@ public:
 class IfNode : public ASTnode {
     std::unique_ptr<ASTnode> condition;
     std::unique_ptr<ASTnode> thenBlock;
-    std::unique_ptr<ASTnode> elseBlock; // nullptr if no else
+    std::unique_ptr<ASTnode> elseBlock;
 public:
     IfNode(std::unique_ptr<ASTnode> cond,
            std::unique_ptr<ASTnode> thenB,
-           std::unique_ptr<ASTnode> elseB = nullptr)
+           std::unique_ptr<ASTnode> elseB = nullptr,
+           const SourceLocation& location = SourceLocation())
         : condition(std::move(cond)), thenBlock(std::move(thenB)), 
-          elseBlock(std::move(elseB)) {}
+          elseBlock(std::move(elseB)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
-
 class WhileNode : public ASTnode {
     std::unique_ptr<ASTnode> condition;
     std::unique_ptr<ASTnode> body;
 public:
-    WhileNode(std::unique_ptr<ASTnode> cond, std::unique_ptr<ASTnode> body)
-        : condition(std::move(cond)), body(std::move(body)) {}
+    WhileNode(std::unique_ptr<ASTnode> cond, 
+              std::unique_ptr<ASTnode> body,
+              const SourceLocation& location = SourceLocation())
+        : condition(std::move(cond)), body(std::move(body)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -145,9 +183,11 @@ class ExternListNode : public ASTnode {
 public:
     std::vector<std::unique_ptr<ASTnode>> externs;
     
-    ExternListNode(std::vector<std::unique_ptr<ASTnode>> exts)
-        : externs(std::move(exts)) {}
-    
+    ExternListNode(std::vector<std::unique_ptr<ASTnode>> exts,
+                   const SourceLocation& location = SourceLocation())
+        : externs(std::move(exts)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -157,17 +197,23 @@ class DeclListNode : public ASTnode {
 public:
     std::vector<std::unique_ptr<ASTnode>> declarations;
     
-    DeclListNode(std::vector<std::unique_ptr<ASTnode>> decls)
-        : declarations(std::move(decls)) {}
-    
+    DeclListNode(std::vector<std::unique_ptr<ASTnode>> decls,
+                 const SourceLocation& location = SourceLocation())
+        : declarations(std::move(decls)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
+
 class ReturnNode : public ASTnode {
-    std::unique_ptr<ASTnode> value; // nullptr for void return
+    std::unique_ptr<ASTnode> value;
 public:
-    ReturnNode(std::unique_ptr<ASTnode> val = nullptr)
-        : value(std::move(val)) {}
+    ReturnNode(std::unique_ptr<ASTnode> val = nullptr,
+               const SourceLocation& location = SourceLocation())
+        : value(std::move(val)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -175,13 +221,15 @@ public:
 class ExprStmtNode : public ASTnode {
     std::unique_ptr<ASTnode> expr;
 public:
-    ExprStmtNode(std::unique_ptr<ASTnode> expr)
-        : expr(std::move(expr)) {}
+    ExprStmtNode(std::unique_ptr<ASTnode> expr,
+                 const SourceLocation& location = SourceLocation())
+        : expr(std::move(expr)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Expression nodes
 class BinaryOpNode : public ASTnode {
     std::string op;
     std::unique_ptr<ASTnode> left;
@@ -189,8 +237,11 @@ class BinaryOpNode : public ASTnode {
 public:
     BinaryOpNode(std::string op,
                  std::unique_ptr<ASTnode> left,
-                 std::unique_ptr<ASTnode> right)
-        : op(op), left(std::move(left)), right(std::move(right)) {}
+                 std::unique_ptr<ASTnode> right,
+                 const SourceLocation& location = SourceLocation())
+        : op(op), left(std::move(left)), right(std::move(right)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -199,8 +250,12 @@ class UnaryOpNode : public ASTnode {
     std::string op;
     std::unique_ptr<ASTnode> operand;
 public:
-    UnaryOpNode(std::string op, std::unique_ptr<ASTnode> operand)
-        : op(op), operand(std::move(operand)) {}
+    UnaryOpNode(std::string op, 
+                std::unique_ptr<ASTnode> operand,
+                const SourceLocation& location = SourceLocation())
+        : op(op), operand(std::move(operand)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -209,8 +264,12 @@ class AssignNode : public ASTnode {
     std::string name;
     std::unique_ptr<ASTnode> value;
 public:
-    AssignNode(std::string name, std::unique_ptr<ASTnode> value)
-        : name(name), value(std::move(value)) {}
+    AssignNode(std::string name, 
+               std::unique_ptr<ASTnode> value,
+               const SourceLocation& location = SourceLocation())
+        : name(name), value(std::move(value)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -218,18 +277,24 @@ public:
 class VariableNode : public ASTnode {
     std::string name;
 public:
-    VariableNode(std::string name) : name(name) {}
+    VariableNode(std::string name,
+                 const SourceLocation& location = SourceLocation())
+        : name(name) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
-
 class FunctionCallNode : public ASTnode {
     std::string name;
     std::vector<std::unique_ptr<ASTnode>> arguments;
 public:
     FunctionCallNode(std::string name, 
-                    std::vector<std::unique_ptr<ASTnode>> args)
-        : name(name), arguments(std::move(args)) {}
+                    std::vector<std::unique_ptr<ASTnode>> args,
+                    const SourceLocation& location = SourceLocation())
+        : name(name), arguments(std::move(args)) {
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
@@ -242,9 +307,21 @@ class LiteralNode : public ASTnode {
         bool boolValue;
     } value;
 public:
-    LiteralNode(int val) : type(LiteralType::Int) { value.intValue = val; }
-    LiteralNode(float val) : type(LiteralType::Float) { value.floatValue = val; }
-    LiteralNode(bool val) : type(LiteralType::Bool) { value.boolValue = val; }
+    LiteralNode(int val, const SourceLocation& location = SourceLocation()) 
+        : type(LiteralType::Int) { 
+        value.intValue = val; 
+        loc = location;
+    }
+    LiteralNode(float val, const SourceLocation& location = SourceLocation()) 
+        : type(LiteralType::Float) { 
+        value.floatValue = val; 
+        loc = location;
+    }
+    LiteralNode(bool val, const SourceLocation& location = SourceLocation()) 
+        : type(LiteralType::Bool) { 
+        value.boolValue = val; 
+        loc = location;
+    }
     Value* codegen() override;
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };

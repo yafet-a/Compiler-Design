@@ -25,8 +25,10 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/SourceMgr.h"
 #include <map>
 #include <string>
+#include <iostream>
 
 extern llvm::LLVMContext TheContext;
 extern llvm::IRBuilder<> Builder;
@@ -56,6 +58,7 @@ llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                         const std::string &VarName,
                                         llvm::Type *VarType);
 
-llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType);
-
+llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType, 
+                          bool inConditionalContext = false,
+                          int lineNo = 1, int columnNo = 1);
 #endif

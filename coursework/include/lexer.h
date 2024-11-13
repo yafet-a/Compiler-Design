@@ -6,12 +6,14 @@
 #include <string>
 
 extern FILE *pFile;
+extern std::string currentFilename;  
 extern int lineNo, columnNo;
 extern std::string IdentifierStr;
 extern int IntVal;
 extern bool BoolVal;
 extern float FloatVal;
 extern std::string StringVal;
+extern std::string currentLineContent;
 
 // Lexer function
 TOKEN gettok();

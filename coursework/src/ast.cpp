@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "llvm_context.h"
+#include "error_handler.h"
 #include <iostream>
 
 // Type node
@@ -291,8 +292,7 @@ Value* VarDeclNode::codegen() {
         // Global variable
         // Check if global variable already exists
         if (TheModule->getGlobalVariable(name)) {
-            std::cerr << "Error: Global variable " << name << " already declared\n";
-            return nullptr;
+            reportError("Redefinition of global variable '" + name + "'", loc);
         }
 
         // Create global variable
@@ -590,8 +590,7 @@ Value* BinaryOpNode::codegen() {
     Value* R = right->codegen();
 
     if (!L || !R) {
-        llvm::errs() << "Error: Failed to generate code for operands\n";
-        return nullptr;
+        reportError("Invalid operands to binary expression", loc.line, loc.column);
     }
 
     llvm::errs() << "Left operand type: " << *L->getType() << "\n";
@@ -740,8 +739,7 @@ Value* AssignNode::codegen() {
     }
 
     if (!varInfo) {
-        std::cerr << "Error: Unknown variable " << name << "\n";
-        return nullptr;
+        reportError("Assignment to undeclared variable '" + name + "'", loc);
     }
 
     // Handle all type conversions through convertToType
@@ -773,7 +771,11 @@ Value* VariableNode::codegen() {
         return Builder.CreateLoad(varInfo.type, varInfo.value, name.c_str());
     }
 
-    std::cerr << "Error: Unknown variable " << name << "\n";
+    // VariableNode::codegen()
+    if (NamedValues.find(name) == NamedValues.end() && 
+        GlobalNamedValues.find(name) == GlobalNamedValues.end()) {
+        reportError("Use of undeclared variable '" + name + "'", loc);
+    }
     return nullptr;
 }
 
@@ -783,13 +785,12 @@ Value* FunctionCallNode::codegen() {
     // Look up the name in the global module table.
     Function *CalleeF = TheModule->getFunction(name);
     if (!CalleeF) {
-        std::cerr << "Error: Function not found: " << name << "\n";
-        return nullptr;
+        reportError("Call to undeclared function '" + name + "'", loc);
     }
 
     // Check argument count
     if (CalleeF->arg_size() != arguments.size()) {
-        std::cerr << "Error: Incorrect number of arguments for function: " << name << "\n";
+        reportError("Incorrect number of arguments for function '" + name + "'", loc);
         return nullptr;
     }
 
