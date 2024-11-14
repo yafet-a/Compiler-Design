@@ -694,25 +694,41 @@ Value* UnaryOpNode::codegen() {
     }
 
     if (op == "!") {
-        // Handle boolean negation
+        // First convert operand to bool if it isn't already
+        Value* BoolVal;
         if (Val->getType()->isIntegerTy(1)) {
-            // Direct boolean negation
-            return Builder.CreateNot(Val, "nottmp");
+            BoolVal = Val;
         } else if (Val->getType()->isIntegerTy()) {
-            // Convert integer to bool first (0 = false, non-0 = true)
-            Value* BoolVal = Builder.CreateICmpNE(
+            // Convert integer to bool (0 = false, non-0 = true)
+            BoolVal = Builder.CreateICmpNE(
                 Val, 
                 ConstantInt::get(Val->getType(), 0), 
-                "booltmp"
+                "to_bool"
             );
-            return Builder.CreateNot(BoolVal, "nottmp");
+        } else if (Val->getType()->isFloatTy()) {
+            // Convert float to bool (0.0 = false, non-0.0 = true)
+            BoolVal = Builder.CreateFCmpONE(
+                Val,
+                ConstantFP::get(Val->getType(), 0.0),
+                "to_bool"
+            );
+        } else {
+            std::cerr << "Error: Invalid operand type for ! operator\n";
+            return nullptr;
         }
+        
+        // Now perform the logical NOT
+        return Builder.CreateNot(BoolVal, "not");
     } else if (op == "-") {
-        // Handle numeric negation
+        // For negation, first ensure we're working with a numeric type
         if (Val->getType()->isFloatTy()) {
-            return Builder.CreateFNeg(Val, "negtmp");
-        } else if (Val->getType()->isIntegerTy()) {
-            return Builder.CreateNeg(Val, "negtmp");
+            return Builder.CreateFNeg(Val, "neg");
+        } else if (Val->getType()->isIntegerTy(32)) {
+            return Builder.CreateNeg(Val, "neg");
+        } else if (Val->getType()->isIntegerTy(1)) {
+            // For bool, first convert to int32, then negate
+            Value* IntVal = Builder.CreateZExt(Val, Type::getInt32Ty(TheContext), "bool_to_int");
+            return Builder.CreateNeg(IntVal, "neg");
         }
     }
 
@@ -744,7 +760,9 @@ Value* AssignNode::codegen() {
 
     // Handle all type conversions through convertToType
     if (Val->getType() != varInfo->type) {
-        Val = convertToType(Val, varInfo->type);
+        // Pass true for inConditionalContext if assigning to a bool
+        bool isAssigningToBool = varInfo->type->isIntegerTy(1);
+        Val = convertToType(Val, varInfo->type, isAssigningToBool, loc.line, loc.column);
         if (!Val) {
             std::cerr << "Error: Invalid type conversion\n";
             return nullptr;

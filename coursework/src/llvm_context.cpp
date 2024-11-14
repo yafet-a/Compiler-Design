@@ -22,11 +22,13 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
     
     // 1. Bool to Int conversion
     if (sourceType->isIntegerTy(1) && targetType->isIntegerTy(32)) {
+        // When widening bool to int, true becomes 1 and false becomes 0
         return Builder.CreateZExt(val, targetType, "bool_to_int");
     }
     
     // 2. Bool to Float conversion
     if (sourceType->isIntegerTy(1) && targetType->isFloatTy()) {
+        // First convert bool to int, then int to float
         auto intVal = Builder.CreateZExt(val, llvm::Type::getInt32Ty(TheContext), "bool_to_int");
         return Builder.CreateSIToFP(intVal, targetType, "int_to_float");
     }
@@ -37,38 +39,36 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
     }
 
     // Special case: Converting to Bool in conditional contexts
-    if (targetType->isIntegerTy(1) && inConditionalContext) {
-        if (sourceType->isIntegerTy()) {
-            return Builder.CreateICmpNE(val, 
-                llvm::ConstantInt::get(sourceType, 0), "to_bool");
-        }
-        if (sourceType->isFloatTy()) {
-            return Builder.CreateFCmpONE(val,
-                llvm::ConstantFP::get(sourceType, 0.0),  // Use sourceType since we know it's float
-                "floattobool");
+    if (targetType->isIntegerTy(1)) {
+        if (inConditionalContext) {
+            if (sourceType->isIntegerTy()) {
+                // For ints, non-zero is true
+                return Builder.CreateICmpNE(val, 
+                    llvm::ConstantInt::get(sourceType, 0), "int_to_bool");
+            }
+            if (sourceType->isFloatTy()) {
+                // For floats, non-zero is true
+                return Builder.CreateFCmpONE(val,
+                    llvm::ConstantFP::get(sourceType, 0.0), "float_to_bool");
+            }
+        } else {
+            // In non-conditional contexts, only allow bool operations to result in bool
+            // For arithmetic operations involving bools, they should be widened to int first
+            reportError("Cannot convert to bool outside conditional context", lineNo, columnNo);
+            return nullptr;
         }
     }
 
-    // Narrowing conversions (should generate errors):
+    // Narrowing conversions (generate errors):
     
     // Float to Int
     if (sourceType->isFloatTy() && targetType->isIntegerTy()) {
         reportError("Cannot convert float to int (narrowing conversion)", lineNo, columnNo);
+        return nullptr;
     }
-
-    // Float to Bool (only in non-conditional contexts)
-    if (sourceType->isFloatTy() && targetType->isIntegerTy(1) && !inConditionalContext) {
-        reportError("Cannot convert float to bool outside conditional context", lineNo, columnNo);
-    }
-
-    // Int to Bool (only in non-conditional contexts)
-    if (sourceType->isIntegerTy(32) && targetType->isIntegerTy(1) && !inConditionalContext) {
-        reportError("Cannot convert int to bool outside conditional context", lineNo, columnNo);
-    }
-
 
     std::cerr << "Error: Unsupported type conversion from ";
-    val->getType()->print(llvm::errs());
+    sourceType->print(llvm::errs());
     std::cerr << " to ";
     targetType->print(llvm::errs());
     std::cerr << "\n";
