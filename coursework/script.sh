@@ -1,6 +1,25 @@
 #!/bin/bash
+set -e
+export LLVM_INSTALL_PATH=/modules/cs325/llvm-18.1.8
+export PATH=$LLVM_INSTALL_PATH/bin:$PATH
+export LD_LIBRARY_PATH=$LLVM_INSTALL_PATH/lib:$LD_LIBRARY_PATH
+CLANG=$LLVM_INSTALL_PATH/bin/clang++
 
-# Function to list all test directories and files
+module load GCC/13.3.0
+
+DIR="$(pwd)"
+
+### Build mccomp compiler
+echo "Cleanup *****"
+rm -rf ./mccomp
+
+echo "Compile *****"
+
+make clean
+make -j mccomp
+
+COMP=$DIR/mccomp
+echo $COMP
 list_tests() {
   echo "Available tests:"
   index=1
@@ -35,15 +54,15 @@ run_tests() {
       if [[ "$selected_test" == "all" ]]; then
         echo "Running all tests..."
         for test in tests/*/*.c; do
-          echo "Running: ./bin/mccomp $test"
-          ./bin/mccomp "$test"
+          echo "Running: ./mccomp $test"
+          ./mccomp "$test"
         done
       elif [[ "$selected_test" == "quit" ]]; then
         echo "Exiting."
         break
       else
-        echo "Running: ./bin/mccomp $selected_test"
-        ./bin/mccomp "$selected_test"
+        echo "Running: ./mccomp $selected_test"
+        ./mccomp "$selected_test"
       fi
     else
       echo "Invalid choice. Please try again."
