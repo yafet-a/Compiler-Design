@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include <cctype>
+#include <vector>
 
 FILE *pFile;
 int lineNo = 1, columnNo = 1;
@@ -7,20 +8,62 @@ std::string IdentifierStr;
 int IntVal;
 bool BoolVal;
 float FloatVal;
+std::string currentLineContent;
+std::string currentFilename;
+long lineStartPos = 0;
+
+
+void updateCurrentLine() {
+    long currentPos = ftell(pFile);  // Save current position
+    fseek(pFile, lineStartPos, SEEK_SET);  // Go to start of line
+    
+    currentLineContent.clear();
+    int c;
+    while ((c = getc(pFile)) != EOF && c != '\n' && c != '\r') {
+        currentLineContent += (char)c;
+    }
+
+    // Handle \r\n if needed
+    if (c == '\r') {
+        if ((c = getc(pFile)) != '\n') {
+            ungetc(c, pFile);
+        }
+    }
+
+    fseek(pFile, currentPos, SEEK_SET);  // Restore position
+}
 
 TOKEN gettok() {
-  static int LastChar = ' ';
-  static int NextChar = ' ';
+    static int LastChar = ' ';
+    static int NextChar = ' ';
+    static int lastLineNo = 0;
 
-  // Skip any whitespace.
-  while (isspace(LastChar)) {
-    if (LastChar == '\n' || LastChar == '\r') {
-      lineNo++;
-      columnNo = 1;
+    // Handle whitespace and track line starts
+    while (isspace(LastChar)) {
+        if (LastChar == '\n' || LastChar == '\r') {
+            lineNo++;
+            columnNo = 1;
+            lineStartPos = ftell(pFile);  // Mark start of new line
+            currentLineContent.clear();    // Clear for new line
+            
+            // Handle \r\n if needed
+            if (LastChar == '\r') {
+                LastChar = getc(pFile);
+                if (LastChar != '\n') {
+                    ungetc(LastChar, pFile);
+                    LastChar = '\r';
+                }
+            }
+        }
+        LastChar = getc(pFile);
+        columnNo++;
     }
-    LastChar = getc(pFile);
-    columnNo++;
-  }
+
+    // Update line content when needed
+    if (lineNo != lastLineNo || currentLineContent.empty()) {
+        updateCurrentLine();
+        lastLineNo = lineNo;
+    }
 
   if (isalpha(LastChar) || (LastChar == '_')) { // identifier: [a-zA-Z_][a-zA-Z_0-9]*
     IdentifierStr = LastChar;

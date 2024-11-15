@@ -857,6 +857,7 @@ Value* VariableNode::codegen() {
 // FunctionCallNode
 Value* FunctionCallNode::codegen() {
     std::cerr << "Generating code for FunctionCallNode: " << name << "\n";
+    
     // Look up the name in the global module table.
     Function *CalleeF = TheModule->getFunction(name);
     if (!CalleeF) {
@@ -864,16 +865,57 @@ Value* FunctionCallNode::codegen() {
     }
 
     // Check argument count
-    if (CalleeF->arg_size() != arguments.size()) {
-        reportError("Incorrect number of arguments for function '" + name + "'", loc);
-        return nullptr;
+    size_t expectedArgs = CalleeF->arg_size();
+    size_t providedArgs = arguments.size();
+    
+    if (expectedArgs != providedArgs) {
+        // Create modified location pointing to the problematic argument
+        SourceLocation errorLoc = loc;
+        
+        // Calculate new column position:
+        // Start with function name position
+        int newCol = loc.column;
+        
+        if (providedArgs > expectedArgs) {
+            // For too many args, point to the first extra argument
+            // Skip past function name and opening paren
+            newCol += name.length() + 1;  // +1 for '('
+            
+            // Skip past the valid arguments and their commas
+            for (size_t i = 0; i < expectedArgs; i++) {
+                // Add argument length and ", " separator
+                newCol += 2;  // For ", "
+            }
+        } else {
+            // For too few args, point to where the next arg should be
+            // Skip to the end of the last provided argument
+            newCol += name.length() + 1;  // +1 for '('
+            for (size_t i = 0; i < providedArgs; i++) {
+                newCol += 2;  // For ", "
+            }
+        }
+        
+        errorLoc.column = newCol;
+
+        std::string msg;
+        if (providedArgs > expectedArgs) {
+            msg = "too many arguments to function call, expected " + 
+                  std::to_string(expectedArgs) + " argument" +
+                  (expectedArgs != 1 ? "s" : "") + ", have " +
+                  std::to_string(providedArgs) + " arguments";
+        } else {
+            msg = "too few arguments to function call, expected " +
+                  std::to_string(expectedArgs) + " argument" +
+                  (expectedArgs != 1 ? "s" : "") + ", have " +
+                  std::to_string(providedArgs) + " arguments";
+        }
+        reportError(msg, errorLoc);
     }
 
     std::vector<Value *> ArgsV;
     for (unsigned i = 0, e = arguments.size(); i != e; ++i) {
         ArgsV.push_back(arguments[i]->codegen());
         if (!ArgsV.back()) {
-            std::cerr << "Error: Failed to generate code for argument " << i << " of function: " << name << "\n";
             return nullptr;
         }
     }
