@@ -397,7 +397,8 @@ Value* BlockNode::codegen() {
     for (const auto& decl : declarations) {
         Last = decl->codegen();
         if (!Last) {
-            NamedValues = OldNamedValues;
+            std::cerr << "Error: Failed to generate code for declaration\n";
+            NamedValues = OldNamedValues;  // Restore scope before error return
             return nullptr;
         }
     }
@@ -406,17 +407,19 @@ Value* BlockNode::codegen() {
     for (const auto& stmt : statements) {
         Last = stmt->codegen();
         if (!Last) {
-            NamedValues = OldNamedValues;
+            std::cerr << "Error: Failed to generate code for statement\n";
+            NamedValues = OldNamedValues;  // Restore scope before error return
             return nullptr;
         }
         
-        // If block is terminated, stop generating more code
+        // If block is terminated (e.g., by a return), stop generating more code
         if (Builder.GetInsertBlock()->getTerminator())
             break;
     }
     
-    // Let the parent function/node handle termination
+    // Restore the previous scope
     NamedValues = OldNamedValues;
+    
     return Last;
 }
 
@@ -590,13 +593,13 @@ Value* ExprStmtNode::codegen() {
 }
 
 // BinaryOpNode
+// BinaryOpNode
 Value* BinaryOpNode::codegen() {
     std::cerr << "Generating code for BinaryOpNode: " << op << "\n";
 
     // Special handling for logical operators
     if (op == "&&" || op == "||") {
         Function* TheFunction = Builder.GetInsertBlock()->getParent();
-        BasicBlock* EntryBlock = Builder.GetInsertBlock();
         
         // Generate code for left operand
         Value* L = left->codegen();
@@ -608,18 +611,25 @@ Value* BinaryOpNode::codegen() {
             if (!L) return nullptr;
         }
 
-        // Create blocks
-        BasicBlock* RHSBlock = BasicBlock::Create(TheContext, "rhs", TheFunction);
-        BasicBlock* MergeBlock = BasicBlock::Create(TheContext, "merge", TheFunction);
+        // Create blocks but don't insert yet
+        BasicBlock* RHSBlock = BasicBlock::Create(TheContext, "rhs");
+        BasicBlock* MergeBlock = BasicBlock::Create(TheContext, "merge");
 
-        // Branch based on operator
+        // Store the entry block for PHI
+        BasicBlock* EntryBlock = Builder.GetInsertBlock();
+
+        // Add the blocks to the function
+        TheFunction->insert(TheFunction->end(), RHSBlock);
+        TheFunction->insert(TheFunction->end(), MergeBlock);
+
+        // Create conditional branch based on operator
         if (op == "&&") {
             Builder.CreateCondBr(L, RHSBlock, MergeBlock);
-        } else {
+        } else { // op == "||"
             Builder.CreateCondBr(L, MergeBlock, RHSBlock);
         }
 
-        // Emit RHS
+        // Emit RHS block
         Builder.SetInsertPoint(RHSBlock);
         Value* R = right->codegen();
         if (!R) return nullptr;
@@ -629,6 +639,7 @@ Value* BinaryOpNode::codegen() {
             if (!R) return nullptr;
         }
 
+        // Store the RHS end block for PHI
         BasicBlock* RHSEndBlock = Builder.GetInsertBlock();
         Builder.CreateBr(MergeBlock);
 
@@ -640,7 +651,7 @@ Value* BinaryOpNode::codegen() {
         if (op == "&&") {
             PN->addIncoming(ConstantInt::getFalse(TheContext), EntryBlock);
             PN->addIncoming(R, RHSEndBlock);
-        } else {
+        } else { // op == "||"
             PN->addIncoming(ConstantInt::getTrue(TheContext), EntryBlock);
             PN->addIncoming(R, RHSEndBlock);
         }
@@ -648,13 +659,11 @@ Value* BinaryOpNode::codegen() {
         return PN;
     }
 
-    // Generate code for the left operand
+    // Generate code for both operands for non-logical operators
     Value* L = left->codegen();
-    if (!L) return nullptr;
-    // Generate code for the right operand
     Value* R = right->codegen();
-    if (!R) {
-        reportError("Invalid operands to binary expression", loc.line, loc.column);
+    if (!L || !R) {
+        reportError("Invalid operands to binary expression", loc);
         return nullptr;
     }
 
