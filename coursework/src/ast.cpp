@@ -357,6 +357,15 @@ Value* FunctionNode::codegen() {
     
     if (body) {
         if (Value *RetVal = body->codegen()) {
+            // If body doesn't end with a terminator, add one
+            if (!Builder.GetInsertBlock()->getTerminator()) {
+                if (RetType->isVoidTy()) {
+                    Builder.CreateRetVoid();
+                } else {
+                    Builder.CreateRet(Constant::getNullValue(RetType));
+                }
+            }
+            
             // Verify the function
             verifyFunction(*F);
             // Restore the previous scope
@@ -388,8 +397,7 @@ Value* BlockNode::codegen() {
     for (const auto& decl : declarations) {
         Last = decl->codegen();
         if (!Last) {
-            std::cerr << "Error: Failed to generate code for declaration\n";
-            NamedValues = OldNamedValues;  // Restore scope before error return
+            NamedValues = OldNamedValues;
             return nullptr;
         }
     }
@@ -398,19 +406,17 @@ Value* BlockNode::codegen() {
     for (const auto& stmt : statements) {
         Last = stmt->codegen();
         if (!Last) {
-            std::cerr << "Error: Failed to generate code for statement\n";
-            NamedValues = OldNamedValues;  // Restore scope before error return
+            NamedValues = OldNamedValues;
             return nullptr;
         }
         
-        // If block is terminated (e.g., by a return), stop generating more code
+        // If block is terminated, stop generating more code
         if (Builder.GetInsertBlock()->getTerminator())
             break;
     }
     
-    // Restore the previous scope
+    // Let the parent function/node handle termination
     NamedValues = OldNamedValues;
-    
     return Last;
 }
 
@@ -585,29 +591,71 @@ Value* ExprStmtNode::codegen() {
 
 // BinaryOpNode
 Value* BinaryOpNode::codegen() {
-    llvm::errs() << "Generating code for BinaryOpNode: " << op << "\n";
-    Value* L = left->codegen();
-    Value* R = right->codegen();
-
-    if (!L || !R) {
-        reportError("Invalid operands to binary expression", loc.line, loc.column);
-    }
-
-    llvm::errs() << "Left operand type: " << *L->getType() << "\n";
-    llvm::errs() << "Right operand type: " << *R->getType() << "\n";
+    std::cerr << "Generating code for BinaryOpNode: " << op << "\n";
 
     // Special handling for logical operators
     if (op == "&&" || op == "||") {
-        // Convert operands to bool if needed
-        if (!L->getType()->isIntegerTy(1)) {
-            L = convertToType(L, Type::getInt1Ty(TheContext));
-        }
-        if (!R->getType()->isIntegerTy(1)) {
-            R = convertToType(R, Type::getInt1Ty(TheContext));
-        }
-        if (!L || !R) return nullptr;
+        Function* TheFunction = Builder.GetInsertBlock()->getParent();
+        BasicBlock* EntryBlock = Builder.GetInsertBlock();
+        
+        // Generate code for left operand
+        Value* L = left->codegen();
+        if (!L) return nullptr;
 
-        return (op == "&&") ? Builder.CreateAnd(L, R) : Builder.CreateOr(L, R);
+        // Convert to bool if needed
+        if (!L->getType()->isIntegerTy(1)) {
+            L = convertToType(L, Type::getInt1Ty(TheContext), true, loc.line, loc.column);
+            if (!L) return nullptr;
+        }
+
+        // Create blocks
+        BasicBlock* RHSBlock = BasicBlock::Create(TheContext, "rhs", TheFunction);
+        BasicBlock* MergeBlock = BasicBlock::Create(TheContext, "merge", TheFunction);
+
+        // Branch based on operator
+        if (op == "&&") {
+            Builder.CreateCondBr(L, RHSBlock, MergeBlock);
+        } else {
+            Builder.CreateCondBr(L, MergeBlock, RHSBlock);
+        }
+
+        // Emit RHS
+        Builder.SetInsertPoint(RHSBlock);
+        Value* R = right->codegen();
+        if (!R) return nullptr;
+
+        if (!R->getType()->isIntegerTy(1)) {
+            R = convertToType(R, Type::getInt1Ty(TheContext), true, loc.line, loc.column);
+            if (!R) return nullptr;
+        }
+
+        BasicBlock* RHSEndBlock = Builder.GetInsertBlock();
+        Builder.CreateBr(MergeBlock);
+
+        // Emit merge block
+        Builder.SetInsertPoint(MergeBlock);
+        PHINode* PN = Builder.CreatePHI(Type::getInt1Ty(TheContext), 2, "logical.result");
+
+        // Set up PHI node values
+        if (op == "&&") {
+            PN->addIncoming(ConstantInt::getFalse(TheContext), EntryBlock);
+            PN->addIncoming(R, RHSEndBlock);
+        } else {
+            PN->addIncoming(ConstantInt::getTrue(TheContext), EntryBlock);
+            PN->addIncoming(R, RHSEndBlock);
+        }
+
+        return PN;
+    }
+
+    // Generate code for the left operand
+    Value* L = left->codegen();
+    if (!L) return nullptr;
+    // Generate code for the right operand
+    Value* R = right->codegen();
+    if (!R) {
+        reportError("Invalid operands to binary expression", loc.line, loc.column);
+        return nullptr;
     }
 
     // For arithmetic operations
