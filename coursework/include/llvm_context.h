@@ -29,6 +29,7 @@
 #include <map>
 #include <string>
 #include <iostream>
+#include "tokens.h"
 
 extern llvm::LLVMContext TheContext;
 extern llvm::IRBuilder<> Builder;
@@ -60,5 +61,5 @@ llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
 
 llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType, 
                           bool inConditionalContext = false,
-                          int lineNo = 1, int columnNo = 1);
+                          const TOKEN& loc = TOKEN());
 #endif

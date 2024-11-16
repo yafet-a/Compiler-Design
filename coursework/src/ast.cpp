@@ -434,7 +434,7 @@ Value* IfNode::codegen() {
 
     // Convert condition to bool using convertToType with conditional context
     if (!CondV->getType()->isIntegerTy(1)) {
-        CondV = convertToType(CondV, llvm::Type::getInt1Ty(TheContext), true);
+        CondV = convertToType(CondV, llvm::Type::getInt1Ty(TheContext), true, loc);
         if (!CondV) {
             std::cerr << "Error: Failed to convert condition to bool\n";
             return nullptr;
@@ -569,7 +569,7 @@ Value* ReturnNode::codegen() {
 
         // If the return value type does not match the function's return type, convert it
         if (RetVal && RetVal->getType() != RetType) {
-            RetVal = convertToType(RetVal, RetType);
+            RetVal = convertToType(RetVal, RetType, false, loc);
             if (!RetVal) {
                 std::cerr << "Error: Invalid type conversion in return\n";
                 return nullptr;
@@ -607,7 +607,7 @@ Value* BinaryOpNode::codegen() {
 
         // Convert to bool if needed
         if (!L->getType()->isIntegerTy(1)) {
-            L = convertToType(L, Type::getInt1Ty(TheContext), true, loc.line, loc.column);
+            L = convertToType(L, Type::getInt1Ty(TheContext), true, loc);
             if (!L) return nullptr;
         }
 
@@ -635,7 +635,7 @@ Value* BinaryOpNode::codegen() {
         if (!R) return nullptr;
 
         if (!R->getType()->isIntegerTy(1)) {
-            R = convertToType(R, Type::getInt1Ty(TheContext), true, loc.line, loc.column);
+            R = convertToType(R, Type::getInt1Ty(TheContext), true, loc);
             if (!R) return nullptr;
         }
 
@@ -671,20 +671,20 @@ Value* BinaryOpNode::codegen() {
     // If either operand is float, convert both to float
     if (L->getType()->isFloatTy() || R->getType()->isFloatTy()) {
         if (!L->getType()->isFloatTy()) {
-            L = convertToType(L, Type::getFloatTy(TheContext));
+            L = convertToType(L, Type::getFloatTy(TheContext), false, loc);
         }
         if (!R->getType()->isFloatTy()) {
-            R = convertToType(R, Type::getFloatTy(TheContext));
+            R = convertToType(R, Type::getFloatTy(TheContext), false, loc);
         }
         if (!L || !R) return nullptr;
     }
     // Otherwise if either is int32, convert both to int32
     else if (L->getType()->isIntegerTy(32) || R->getType()->isIntegerTy(32)) {
         if (!L->getType()->isIntegerTy(32)) {
-            L = convertToType(L, Type::getInt32Ty(TheContext));
+            L = convertToType(L, Type::getInt32Ty(TheContext), false, loc);
         }
         if (!R->getType()->isIntegerTy(32)) {
-            R = convertToType(R, Type::getInt32Ty(TheContext));
+            R = convertToType(R, Type::getInt32Ty(TheContext), false, loc);
         }
         if (!L || !R) return nullptr;
     }
@@ -819,7 +819,7 @@ Value* AssignNode::codegen() {
     if (Val->getType() != varInfo->type) {
         // Pass true for inConditionalContext if assigning to a bool
         bool isAssigningToBool = varInfo->type->isIntegerTy(1);
-        Val = convertToType(Val, varInfo->type, isAssigningToBool, loc.line, loc.column);
+        Val = convertToType(Val, varInfo->type, isAssigningToBool, loc);
         if (!Val) {
             std::cerr << "Error: Invalid type conversion\n";
             return nullptr;
@@ -870,11 +870,11 @@ Value* FunctionCallNode::codegen() {
     
     if (expectedArgs != providedArgs) {
         // Create modified location pointing to the problematic argument
-        SourceLocation errorLoc = loc;
+        TOKEN errorLoc = loc;
         
         // Calculate new column position:
         // Start with function name position
-        int newCol = loc.column;
+        int newCol = loc.columnNo;
         
         if (providedArgs > expectedArgs) {
             // For too many args, point to the first extra argument
@@ -895,7 +895,7 @@ Value* FunctionCallNode::codegen() {
             }
         }
         
-        errorLoc.column = newCol;
+        errorLoc.columnNo = newCol;
 
         std::string msg;
         if (providedArgs > expectedArgs) {

@@ -12,7 +12,7 @@ llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
 }
 
 llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType, 
-                          bool inConditionalContext, int lineNo, int columnNo) {
+                          bool inConditionalContext, const TOKEN& loc) {
     if (!val || !targetType) return nullptr;
 
     llvm::Type* sourceType = val->getType();
@@ -54,7 +54,7 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
         } else {
             // In non-conditional contexts, only allow bool operations to result in bool
             // For arithmetic operations involving bools, they should be widened to int first
-            reportError("Cannot convert to bool outside conditional context", lineNo, columnNo);
+            reportError("Cannot convert to bool outside conditional context", loc);
             return nullptr;
         }
     }
@@ -63,15 +63,23 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
     
     // Float to Int
     if (sourceType->isFloatTy() && targetType->isIntegerTy()) {
-        reportError("Cannot convert float to int (narrowing conversion)", lineNo, columnNo);
+        reportError("Cannot convert float to int (narrowing conversion)", loc);
         return nullptr;
     }
 
-    std::cerr << "Error: Unsupported type conversion from ";
-    sourceType->print(llvm::errs());
-    std::cerr << " to ";
-    targetType->print(llvm::errs());
-    std::cerr << "\n";
+    // Unsupported type conversions
+    std::string sourceTypeName = sourceType->isIntegerTy() ? "int" :
+                                 sourceType->isFloatTy() ? "float" :
+                                 sourceType->isIntegerTy(1) ? "bool" :
+                                 "unknown";
+    std::string targetTypeName = targetType->isIntegerTy() ? "int" :
+                                 targetType->isFloatTy() ? "float" :
+                                 targetType->isIntegerTy(1) ? "bool" :
+                                 "unknown";
+
+    std::string errorMessage = "Unsupported type conversion from " + sourceTypeName + 
+                                " to " + targetTypeName;
+    reportError(errorMessage, loc);
     
     return nullptr;
 }

@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "tokens.h"
 #include "lexer.h"
+#include "error_handler.h"
 #include <iostream>
 #include <deque>
 #include <unordered_set>
@@ -10,57 +11,13 @@
 TOKEN CurTok;
 std::deque<TOKEN> tok_buffer;
 
-//Error Handling
-void emitError(const std::string& message, const TOKEN& token) {
-    // Save current file position
-    long currentPos = ftell(pFile);
-    
-    // Go to start of the line containing the error
-    fseek(pFile, 0, SEEK_SET);
-    int currentLine = 1;
-    std::string line;
-    char buffer[1024];
-    
-    while (currentLine < token.lineNo && fgets(buffer, sizeof(buffer), pFile)) {
-        currentLine++;
-    }
-    
-    // Read the error line
-    if (fgets(buffer, sizeof(buffer), pFile)) {
-        line = buffer;
-        // Remove trailing newline if present
-        if (!line.empty() && line.back() == '\n') {
-            line.pop_back();
-        }
-    }
-    
-    // Restore file position
-    fseek(pFile, currentPos, SEEK_SET);
-    
-    // Print error message with location and context
-    fprintf(stderr, "error:%d:%d: %s\n", token.lineNo, token.columnNo, message.c_str());
-    if (!line.empty()) {
-        fprintf(stderr, "%s\n", line.c_str());
-        // Print caret
-        std::string caretLine(token.columnNo - 1, ' ');
-        caretLine += "^";
-        fprintf(stderr, "%s\n", caretLine.c_str());
-    }
-}
 
-bool expectToken(int expectedType, const std::string& context) {
+void checkToken(int expectedType, const std::string& context) {
     if (CurTok.type != expectedType) {
-        std::string msg = "Expected " + tokenTypeToString(expectedType) +
-                         " but got " + tokenTypeToString(CurTok.type) +
-                         " in " + context;
-        emitError(msg, CurTok);
-        return false;
+        reportError("Expected " + tokenTypeToString(expectedType) + 
+                   " but got " + tokenTypeToString(CurTok.type) + 
+                   " in " + context, CurTok);
     }
-    return true;
-}
-
-SourceLocation captureLocation() {
-    return SourceLocation{currentFilename, CurTok.lineNo, CurTok.columnNo, currentLineContent};
 }
 
 // Keep the token management functions the same
@@ -98,10 +55,9 @@ void debugPrint(const std::string& functionName) {
 //program ::= extern_list decl_list 
 //          | decl_list
 std::unique_ptr<ProgramNode> parseProgram() {
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     if (!FIRST_program.count(CurTok.type)) {
-        emitError("Expected program to start with extern, int, float, bool, or void", CurTok);
-        return nullptr;
+        reportError("undefined reference to 'main'", CurTok);
     }
 
     std::vector<std::unique_ptr<ASTnode>> externs;
@@ -109,12 +65,11 @@ std::unique_ptr<ProgramNode> parseProgram() {
 
     if (CurTok.type == EXTERN) {
         auto externList = parseExternList();
-        if (!externList) return nullptr;
+
         externs = std::move(externList->externs);
     }
 
     auto declList = parseDeclList();
-    if (!declList) return nullptr;
     declarations = std::move(declList->declarations);
 
     return std::make_unique<ProgramNode>(std::move(externs), std::move(declarations), loc);
@@ -122,15 +77,15 @@ std::unique_ptr<ProgramNode> parseProgram() {
 
 // extern_list ::= extern extern_list'
 std::unique_ptr<ExternListNode> parseExternList() {
-    SourceLocation loc = captureLocation();
-    if (!expectToken(EXTERN, "start of extern list")) return nullptr;
+    TOKEN loc = CurTok;
+    
+    if (CurTok.type != EXTERN) {
+        reportError("Expected 'extern' keyword at start of extern list", CurTok);
+    }
     
     std::vector<std::unique_ptr<ASTnode>> externs;
     auto firstExtern = parseExtern();
-    if (!firstExtern) {
-        emitError("Invalid extern declaration", CurTok);
-        return nullptr;
-    }
+    
     externs.push_back(std::move(firstExtern));
     
     return parseExternListPrime(std::move(externs), loc);
@@ -138,7 +93,7 @@ std::unique_ptr<ExternListNode> parseExternList() {
 
 // extern_list' ::= extern extern_list'
 //                | epsilon
-std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs, SourceLocation loc) {
+std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs, TOKEN loc) {
     debugPrint("parseExternListPrime");
     
     if (CurTok.type == EXTERN) {
@@ -154,7 +109,7 @@ std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr
 
 // decl_list ::= decl decl_list'
 std::unique_ptr<DeclListNode> parseDeclList() {
-    SourceLocation loc = captureLocation();  
+    TOKEN loc = CurTok;  
     
     debugPrint("parseDeclList");
     std::vector<std::unique_ptr<ASTnode>> declarations;
@@ -171,7 +126,7 @@ std::unique_ptr<DeclListNode> parseDeclList() {
 
 // decl_list' ::= decl decl_list'
 //              | epsilon
-std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations, SourceLocation loc) {
+std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations, TOKEN loc) {
     debugPrint("parseDeclListPrime");
     
     if (FIRST_decl.count(CurTok.type)) {
@@ -187,28 +142,40 @@ std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<AST
 
 //extern ::= "extern" type_spec IDENT "(" params ")" ";"
 std::unique_ptr<ExternNode> parseExtern() {
-    SourceLocation loc{currentFilename, CurTok.lineNo, CurTok.columnNo, ""};
+    TOKEN loc = CurTok;
     
-    if (!expectToken(EXTERN, "extern declaration")) return nullptr;
+    if (CurTok.type != EXTERN) {
+        reportError("Expected 'extern' keyword", CurTok);
+    }
     getNextToken();
     
     std::string returnType = parseTypeSpec();
     if (returnType.empty()) return nullptr;
     
-    if (!expectToken(IDENT, "extern function name")) return nullptr;
+    if (CurTok.type != IDENT) {
+        reportError("Expected identifier after return type in extern declaration", CurTok);
+    }
     std::string name = CurTok.lexeme;
     getNextToken();
     
-    if (!expectToken(LPAR, "extern parameter list")) return nullptr;
+    if (CurTok.type != LPAR) {
+        reportError("Expected '(' after function name in extern declaration", CurTok);
+    }
     getNextToken();
     
     auto params = parseParams();
-    if (!params) return nullptr;
+    if (!params) {
+        reportError("Failed to parse parameters in extern declaration", CurTok);
+    }
     
-    if (!expectToken(RPAR, "closing extern parameter list")) return nullptr;
+    if (CurTok.type != RPAR) {
+        reportError("Expected ')' after parameters in extern declaration", CurTok);
+    }
     getNextToken();
     
-    if (!expectToken(SC, "extern declaration")) return nullptr;
+    if (CurTok.type != SC) {
+        reportError("Expected ';' after extern declaration", CurTok);
+    }
     getNextToken();
     
     return std::make_unique<ExternNode>(returnType, name, std::move(*params), loc);
@@ -230,7 +197,7 @@ std::unique_ptr<ASTnode> parseDecl() {
     }
     
     // Capture location here where we know we have an identifier
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     std::string name = CurTok.lexeme;
     getNextToken();
 
@@ -269,7 +236,7 @@ std::unique_ptr<ASTnode> parseDecl() {
 // block ::= "{" local_decls stmt_list "}"
 std::unique_ptr<BlockNode> parseBlock() {
     debugPrint("parseBlock");
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     if (CurTok.type != LBRA) {
         std::cerr << "Expected '{' at start of block\n";
         return nullptr;
@@ -392,7 +359,7 @@ std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique
 
 std::unique_ptr<IfNode> parseIfStmt() {
     debugPrint("parseIfStmt");
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     getNextToken(); // consume IF
     
     if (CurTok.type != LPAR) return nullptr;
@@ -419,7 +386,7 @@ std::unique_ptr<IfNode> parseIfStmt() {
 
 std::unique_ptr<ASTnode> parseExprStmt() {
     debugPrint("parseExprStmt");
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     auto expr = parseExpr();
     if (!expr) return nullptr;
     
@@ -432,7 +399,7 @@ std::unique_ptr<ASTnode> parseExprStmt() {
 std::unique_ptr<ReturnNode> parseReturnStmt() {
     debugPrint("parseReturnStmt");
     
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
 
     getNextToken(); // consume RETURN
     
@@ -462,7 +429,7 @@ std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left) {
     if (CurTok.type == LT || CurTok.type == GT || 
         CurTok.type == LE || CurTok.type == GE) {
         std::string op;
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         switch (CurTok.type) {
             case LT: op = "<"; break;
             case GT: op = ">"; break;
@@ -488,7 +455,7 @@ std::unique_ptr<ASTnode> parseEquality() {
 std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left) {
     debugPrint("parseEqualityPrime");
     if (CurTok.type == EQ || CurTok.type == NE) {
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         std::string op = CurTok.type == EQ ? "==" : "!=";
         getNextToken();
         auto right = parseRelational();
@@ -509,7 +476,7 @@ std::unique_ptr<ASTnode> parseLogicAnd() {
 std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
     debugPrint("parseLogicAndPrime");
     if (CurTok.type == AND) {
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         getNextToken();
         auto right = parseEquality();
         if (!right) return nullptr;
@@ -532,7 +499,7 @@ std::unique_ptr<ASTnode> parseLogicOr() {
 std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
     debugPrint("parseLogicOrPrime");
     if (CurTok.type == OR) {
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         getNextToken();
         auto right = parseLogicAnd();
         if (!right) return nullptr;
@@ -548,7 +515,7 @@ std::unique_ptr<ASTnode> parseExpr() {
 
 std::unique_ptr<ASTnode> parseAssignExpr() {
     if (CurTok.type == IDENT) {
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         TOKEN savedTok = CurTok;
         getNextToken();
         if (CurTok.type == ASSIGN) {
@@ -574,7 +541,7 @@ std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left) {
     debugPrint("parseAdditivePrime");
     if (CurTok.type == PLUS || CurTok.type == MINUS) {
         std::string op = CurTok.type == PLUS ? "+" : "-";
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         getNextToken();
         auto right = parseMultiply();
         if (!right) return nullptr;
@@ -600,7 +567,7 @@ std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
             case DIV: op = "/"; break;
             case MOD: op = "%"; break;
         }
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         getNextToken();
         auto right = parseUnary();
         if (!right) return nullptr;
@@ -615,7 +582,7 @@ std::unique_ptr<ASTnode> parsePrimary() {
     switch (CurTok.type) {
         case IDENT: {
             std::string name = CurTok.lexeme;
-            SourceLocation loc = captureLocation();
+            TOKEN loc = CurTok;;
 
             getNextToken();
             if (CurTok.type == LPAR) {
@@ -633,19 +600,19 @@ std::unique_ptr<ASTnode> parsePrimary() {
         }
         case INT_LIT: {
             int val = std::stoi(CurTok.lexeme);
-            SourceLocation loc = captureLocation();
+            TOKEN loc = CurTok;;
             getNextToken();
             return std::make_unique<LiteralNode>(val, loc);
         }
         case FLOAT_LIT: {
             float val = std::stof(CurTok.lexeme);
-            SourceLocation loc = captureLocation();
+            TOKEN loc = CurTok;;
             getNextToken();
             return std::make_unique<LiteralNode>(val, loc);
         }
         case BOOL_LIT: {
             bool val = (CurTok.lexeme == "true");
-            SourceLocation loc = captureLocation();
+            TOKEN loc = CurTok;;
             getNextToken();
             return std::make_unique<LiteralNode>(val, loc);
         }
@@ -670,7 +637,7 @@ std::unique_ptr<ASTnode> parseUnary() {
     debugPrint("parseUnary");
     if (CurTok.type == MINUS || CurTok.type == NOT) {
         std::string op = (CurTok.type == MINUS) ? "-" : "!";
-        SourceLocation loc = captureLocation();
+        TOKEN loc = CurTok;;
         getNextToken(); // Consume the unary operator
         
         auto operand = parseUnary(); // Recursive call to handle nested unary expressions
@@ -688,7 +655,7 @@ std::unique_ptr<ASTnode> parseLocalDecl() {
     if (type.empty()) return nullptr;
     
     if (CurTok.type != IDENT) return nullptr;
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     std::string name = CurTok.lexeme;
     getNextToken();
     
@@ -714,7 +681,7 @@ std::string parseTypeSpec() {
 
 std::unique_ptr<WhileNode> parseWhile() {
     debugPrint("parseWhile");
-    SourceLocation loc = captureLocation();
+    TOKEN loc = CurTok;
     getNextToken(); // consume WHILE
     
     if (CurTok.type != LPAR) {

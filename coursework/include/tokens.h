@@ -65,10 +65,12 @@ enum TOKEN_TYPE {
 
 // TOKEN struct is used to keep track of information about a token
 struct TOKEN {
-  int type = -100;
-  std::string lexeme;
-  int lineNo;
-  int columnNo;
+    int type = -100;
+    std::string lexeme;
+    int lineNo;
+    int columnNo;
+    std::string lineContent;
+    std::string filename;
 };
 
 // Utility function to create a token

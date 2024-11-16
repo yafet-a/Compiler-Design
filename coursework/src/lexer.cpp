@@ -12,25 +12,24 @@ std::string currentLineContent;
 std::string currentFilename;
 long lineStartPos = 0;
 
-
 void updateCurrentLine() {
-    long currentPos = ftell(pFile);  // Save current position
-    fseek(pFile, lineStartPos, SEEK_SET);  // Go to start of line
+    long currentPos = ftell(pFile);
+    fseek(pFile, lineStartPos, SEEK_SET);
     
     currentLineContent.clear();
     int c;
     while ((c = getc(pFile)) != EOF && c != '\n' && c != '\r') {
         currentLineContent += (char)c;
     }
-
+    
     // Handle \r\n if needed
     if (c == '\r') {
         if ((c = getc(pFile)) != '\n') {
             ungetc(c, pFile);
         }
     }
-
-    fseek(pFile, currentPos, SEEK_SET);  // Restore position
+    
+    fseek(pFile, currentPos, SEEK_SET);
 }
 
 TOKEN gettok() {
@@ -61,9 +60,11 @@ TOKEN gettok() {
 
     // Update line content when needed
     if (lineNo != lastLineNo || currentLineContent.empty()) {
-        updateCurrentLine();
-        lastLineNo = lineNo;
+      printf("Updating line: %d, Current Position: %ld\n", lineNo, ftell(pFile));
+      updateCurrentLine();
+      lastLineNo = lineNo;
     }
+
 
   if (isalpha(LastChar) || (LastChar == '_')) { // identifier: [a-zA-Z_][a-zA-Z_0-9]*
     IdentifierStr = LastChar;

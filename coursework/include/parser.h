@@ -3,6 +3,7 @@
 
 #include "tokens.h"
 #include "ast.h"
+#include "error_handler.h"
 #include <memory>
 #include <vector>
 #include <optional>
@@ -29,9 +30,9 @@ std::unique_ptr<ASTnode> parsePrimary();
 std::unique_ptr<ASTnode> parseExprStmt();
 std::unique_ptr<ASTnode> parseLocalDecl();
 std::unique_ptr<ExternListNode> parseExternList();
-std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs);
+std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs, TOKEN loc);
 std::unique_ptr<DeclListNode> parseDeclList();
-std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations);
+std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations, TOKEN loc);
 std::unique_ptr<ASTnode> parseLogicOr();
 std::unique_ptr<ASTnode> parseLogicAnd();
 std::unique_ptr<ASTnode> parseEquality();
