@@ -4,7 +4,22 @@
 #include <string>
 #include "tokens.h"
 
-// The main error reporting function
-[[noreturn]] void reportError(const std::string& message, const TOKEN& token, bool withHighlighting = true);
+struct Note {
+    std::string message;
+    TOKEN location;
+};
 
+struct CaretPosition {
+    int column;
+    bool useDefaultHighlight;
+};
+
+// The main error reporting function
+[[noreturn]] void reportError(const std::string& message, 
+                             const TOKEN& token,
+                             bool withHighlighting = true,
+                             const Note* note = nullptr,
+                             const CaretPosition* mainCaret = nullptr,
+                             const CaretPosition* noteCaret = nullptr);
+                             
 #endif // ERROR_HANDLER_H

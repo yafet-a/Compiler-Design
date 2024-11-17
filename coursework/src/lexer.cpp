@@ -60,7 +60,6 @@ TOKEN gettok() {
 
     // Update line content when needed
     if (lineNo != lastLineNo || currentLineContent.empty()) {
-      printf("Updating line: %d, Current Position: %ld\n", lineNo, ftell(pFile));
       updateCurrentLine();
       lastLineNo = lineNo;
     }

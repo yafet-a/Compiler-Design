@@ -2,217 +2,271 @@
 #include "llvm_context.h"
 #include "error_handler.h"
 #include <iostream>
+#include <sstream>
 
-// Type node
-std::string TypeNode::to_string(int indent, bool isLast) const {
-    return getPrefix(indent, isLast) + "Type: " + typeName + "\n";
+const char* BRIGHT_MAGENTA = "\033[95m";
+
+// UTF-8 box drawing characters that match the tree command
+const char* VERTICAL = "│   ";
+const char* BRANCH = "├── ";
+const char* LAST_BRANCH = "└── ";
+const char* INDENT = "    ";
+
+std::string formatLoc(const TOKEN& loc) {
+    std::stringstream ss;
+    ss << BRIGHT_MAGENTA << " <line:" << loc.lineNo << ", col:" << loc.columnNo << ">" << "\033[0m";
+    return ss.str();
 }
 
-// Program node
-std::string ProgramNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "Program\n";
-    for (size_t i = 0; i < externs.size(); i++) {
-        result += externs[i]->to_string(indent + 3, 
-            i == externs.size() - 1 && declarations.empty());
-    }
-    for (size_t i = 0; i < declarations.size(); i++) {
-        result += declarations[i]->to_string(indent + 3, 
-            i == declarations.size() - 1);
-    }
-    return result;
-}
+std::string ASTnode::getPrefix(int indent, bool isLast) {
+    std::string result;
 
-// External declaration node
-std::string ExternNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "ExternDef: (" + type + ") " + name + "\n";
-    for (size_t i = 0; i < params.size(); i++) {
-        result += getPrefix(indent + 3, i == params.size() - 1) + 
-                 "Param: (" + params[i].first + ") " + params[i].second + "\n";
+    // Track whether each level is the last child
+    static std::vector<bool> isLastLevel;
+    if (indent / 4 > isLastLevel.size()) {
+        isLastLevel.push_back(false);
     }
-    return result;
-}
+    if (indent / 4 < isLastLevel.size()) {
+        isLastLevel.resize(indent / 4);
+    }
 
-// Variable declaration node
-std::string VarDeclNode::to_string(int indent, bool isLast) const {
-    return getPrefix(indent, isLast) + "VariableDeclaration: (" + type + ") " + name + "\n";
-}
-
-// Function declaration node
-std::string FunctionNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "FunctionDef: (" + returnType + ") " + name + "\n";
-    for (size_t i = 0; i < params.size(); i++) {
-        bool paramIsLast = (i == params.size() - 1) && !body;
-        result += getPrefix(indent + 3, paramIsLast) + 
-                 "Param: (" + params[i].first + ") " + params[i].second + "\n";
-    }
-    if (body) {
-        result += body->to_string(indent + 3, true);
-    }
-    return result;
-}
-
-// Block node
-std::string BlockNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "BlockStmt:\n";
-    std::string childIndent = getChildIndent(indent, isLast);
-    
-    if (!declarations.empty() || !statements.empty()) {
-        result += childIndent + "│\n";  // Add initial connecting line
-    }
-    
-    for (size_t i = 0; i < declarations.size(); i++) {
-        bool isDeclLast = (i == declarations.size() - 1 && statements.empty());
-        result += declarations[i]->to_string(indent + 3, isDeclLast);
-        if (!isDeclLast) {
-            result += childIndent + "│\n";  // Add connecting line between items
+    if (indent > 0) {
+        for (size_t i = 0; i < isLastLevel.size() - 1; ++i) {
+            result += isLastLevel[i] ? INDENT : VERTICAL;
         }
+        result += isLast ? LAST_BRANCH : BRANCH;
     }
-    
-    for (size_t i = 0; i < statements.size(); i++) {
-        result += statements[i]->to_string(indent + 3, i == statements.size() - 1);
-        if (i < statements.size() - 1) {
-            result += childIndent + "│\n";  // Add connecting line between items
-        }
+
+    if (indent / 4 >= 1) {
+        isLastLevel[indent / 4 - 1] = isLast;
     }
     return result;
 }
 
-// If node
-std::string IfNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "IfStmt:\n";
-    std::string childIndent = getChildIndent(indent, isLast);
-    
-    result += childIndent + "│\n";  // Add initial connecting line
-    result += getPrefix(indent + 3, false) + "Condition:\n";
-    result += condition->to_string(indent + 6, true);
-    
-    result += childIndent + "│\n";  // Add connecting line between condition and then
-    result += getPrefix(indent + 3, !elseBlock) + "ThenBlock:\n";
-    result += thenBlock->to_string(indent + 6, !elseBlock);
-    
-    if (elseBlock) {
-        result += childIndent + "│\n";  // Add connecting line before else
-        result += getPrefix(indent + 3, true) + "ElseBlock:\n";
-        result += elseBlock->to_string(indent + 6, true);
-    }
-    return result;
-}
 
-// While node
-std::string WhileNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "WhileStmt:\n";
-    result += getPrefix(indent + 3, false) + "Condition:\n";
-    result += condition->to_string(indent + 6, true);
-    result += getPrefix(indent + 3, true) + "Body:\n";
-    result += body->to_string(indent + 6, true);
-    return result;
-}
-
-// Return node
-std::string ReturnNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "ReturnStmt:\n";
-    if (value) {
-        result += value->to_string(indent + 3, true);
-    }
-    return result;
-}
-
-// Expression statement node
-std::string ExprStmtNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "ExprStmt:\n";
-    if (expr) {
-        result += expr->to_string(indent + 3, true);
-    }
-    return result;
-}
-
-// Binary operation node
 std::string BinaryOpNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "BinaryOperation: " + op + "\n";
-    std::string childIndent = getChildIndent(indent, isLast);
-    // Add vertical line prefix for nested structure
-    result += childIndent + "│\n";  // Add connecting line
-    result += left->to_string(indent + 3, false);
-    result += right->to_string(indent + 3, true);
-    return result;
-}
-
-
-// Unary operation node
-std::string UnaryOpNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "UnaryOperation: " + op + "\n";
-    result += operand->to_string(indent + 3, true);
-    return result;
-}
-
-// Assignment node
-std::string AssignNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "VariableAssignment: " + name + "\n";
-    std::string childIndent = getChildIndent(indent, isLast);
-    result += childIndent + "│\n";  // Add connecting line
-    result += value->to_string(indent + 3, true);
-    return result;
-}
-
-// Variable node
-std::string VariableNode::to_string(int indent, bool isLast) const {
-    return getPrefix(indent, isLast) + "VariableCall: " + name + "\n";
-}
-
-// Function call node
-std::string FunctionCallNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "FunctionCall: " + name + "\n";
-    for (size_t i = 0; i < arguments.size(); i++) {
-        result += arguments[i]->to_string(indent + 3, i == arguments.size() - 1);
+    std::string result = getPrefix(indent, isLast) + 
+                        "BinaryOperator" + 
+                        formatLoc(loc) + " " +
+                        "'" + op + "'" + "\n";
+    if (left) {
+        result += left->to_string(indent + 4, !right);  // right determines if left is last
+    }
+    if (right) {
+        result += right->to_string(indent + 4, true);   // right is always last
     }
     return result;
 }
 
-// Literal node
+std::string BlockNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + 
+                        "Block" + 
+                        formatLoc(loc) + "\n";
+    
+    std::vector<ASTnode*> allChildren;
+    for (const auto& decl : declarations) {
+        allChildren.push_back(decl.get());
+    }
+    for (const auto& stmt : statements) {
+        allChildren.push_back(stmt.get());
+    }
+    
+    for (size_t i = 0; i < allChildren.size(); i++) {
+        bool isLastChild = (i == allChildren.size() - 1);
+        result += allChildren[i]->to_string(indent + 4, isLastChild);
+    }
+    return result;
+}
+
+std::string IfNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "IfStmt" + formatLoc(loc) + "\n";
+    
+    if (condition) {
+        result += condition->to_string(indent + 4, !thenBlock && !elseBlock);
+    }
+    if (thenBlock) {
+        result += thenBlock->to_string(indent + 4, !elseBlock);
+    }
+    if (elseBlock) {
+        result += elseBlock->to_string(indent + 4, true);
+    }
+    return result;
+}
+
+
+
+std::string TypeNode::to_string(int indent, bool isLast) const {
+    return getPrefix(indent, isLast) + "TypeNode" + formatLoc(loc) + 
+           " '" + typeName + "'\n";
+}
+
+std::string ProgramNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "Program" + formatLoc(loc) + "\n";
+    
+    for (size_t i = 0; i < externs.size(); i++) {
+        bool isLastExtern = (i == externs.size() - 1) && declarations.empty();
+        result += externs[i]->to_string(indent + 4, isLastExtern);
+    }
+    
+    for (size_t i = 0; i < declarations.size(); i++) {
+        result += declarations[i]->to_string(indent + 4, i == declarations.size() - 1);
+    }
+    return result;
+}
+
+std::string ExternNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "ExternDecl" + formatLoc(loc) + 
+                        " '" + name + "' type='" + type + "'\n";
+    
+    for (size_t i = 0; i < params.size(); i++) {
+        result += getPrefix(indent + 4, i == params.size() - 1) +
+                 "ParmVarDecl '" + params[i].second + "' type='" + params[i].first + "'\n";
+    }
+    return result;
+}
+
+std::string FunctionNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + 
+                        "FunctionDecl" + 
+                        formatLoc(loc) + " " +
+                        "'" + name + "' type='" + returnType + "'" + "\n";
+    
+    for (size_t i = 0; i < params.size(); i++) {
+        bool isLastParam = (i == params.size() - 1) && !body;
+        result += getPrefix(indent + 4, isLastParam) +
+                 "ParmVarDecl" + " " +
+                 "'" + params[i].second + "' type='" + params[i].first + "'" + "\n";
+    }
+    
+    if (body) {
+        result += body->to_string(indent + 4, true);
+    }
+    return result;
+}
+
+
+std::string VariableNode::to_string(int indent, bool isLast) const {
+    return getPrefix(indent, isLast) + "VariableNode" + formatLoc(loc) + 
+           " '" + name + "'\n";
+}
+
 std::string LiteralNode::to_string(int indent, bool isLast) const {
     std::string typeStr;
     std::string valueStr;
     
     switch (type) {
         case LiteralType::Int:
-            typeStr = "IntLit";
+            typeStr = "IntegerLiteral";
             valueStr = std::to_string(value.intValue);
             break;
         case LiteralType::Float:
-            typeStr = "FloatLit";
+            typeStr = "FloatingLiteral";
             valueStr = std::to_string(value.floatValue);
             break;
         case LiteralType::Bool:
-            typeStr = "BoolLit";
+            typeStr = "BooleanLiteral";
             valueStr = value.boolValue ? "true" : "false";
             break;
     }
     
-    return getPrefix(indent, isLast) + typeStr + ": " + valueStr + "\n";
+    return getPrefix(indent, isLast) + typeStr + formatLoc(loc) + 
+           " '" + valueStr + "'\n";
 }
 
-// ExternListNode
-std::string ExternListNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "ExternList:\n";
-    for (size_t i = 0; i < externs.size(); i++) {
-        result += externs[i]->to_string(indent + 3, i == externs.size() - 1);
+std::string VarDeclNode::to_string(int indent, bool isLast) const {
+    return getPrefix(indent, isLast) + "VarDecl" + formatLoc(loc) + 
+           " '" + name + "' type='" + type + "'\n";
+}
+
+std::string WhileNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "WhileStmt" + formatLoc(loc) + "\n";
+    
+    if (condition) {
+        result += condition->to_string(indent + 4, !body);
+    }
+    if (body) {
+        result += body->to_string(indent + 4, true);
     }
     return result;
 }
 
-// DeclListNode
+
+std::string ReturnNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "ReturnStmt" + formatLoc(loc) + "\n";
+    if (value) {
+        result += value->to_string(indent + 4, true);  // return value is always last
+    }
+    return result;
+}
+
+std::string ExprStmtNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "ExprStmt" + formatLoc(loc) + "\n";
+    if (expr) {
+        result += expr->to_string(indent + 4, true);
+    }
+    return result;
+}
+
+std::string UnaryOpNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "UnaryOperator" + formatLoc(loc) + 
+                        " '" + op + "'\n";
+    if (operand) {
+        result += operand->to_string(indent + 4, true);  // always last as single child
+    }
+    return result;
+}
+
+std::string AssignNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "BinaryOperator" + formatLoc(loc) + 
+                        " '='\n";
+    
+    // Variable reference
+    result += getPrefix(indent + 4, !value) + "DeclRefExpr" + formatLoc(loc) + 
+              " '" + name + "'\n";
+    
+    // Value being assigned
+    if (value) {
+        result += value->to_string(indent + 4, true);  // value is always last
+    }
+    return result;
+}
+
+std::string FunctionCallNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "FunctionCall" + formatLoc(loc) + 
+                        " '" + name + "'\n";
+    
+    // Function reference
+    result += getPrefix(indent + 4, arguments.empty()) + 
+              "DeclRefExpr" + formatLoc(loc) + " '" + name + "'\n";
+    
+    // Arguments
+    for (size_t i = 0; i < arguments.size(); i++) {
+        bool isLastArg = (i == arguments.size() - 1);
+        result += arguments[i]->to_string(indent + 4, isLastArg);
+    }
+    return result;
+}
+
 std::string DeclListNode::to_string(int indent, bool isLast) const {
-    std::string result = getPrefix(indent, isLast) + "DeclList:\n";
+    std::string result = getPrefix(indent, isLast) + "DeclList" + formatLoc(loc) + "\n";
+    
     for (size_t i = 0; i < declarations.size(); i++) {
-        result += declarations[i]->to_string(indent + 3, i == declarations.size() - 1);
+        result += declarations[i]->to_string(indent + 4, i == declarations.size() - 1);
+    }
+    return result;
+}
+
+std::string ExternListNode::to_string(int indent, bool isLast) const {
+    std::string result = getPrefix(indent, isLast) + "ExternList" + formatLoc(loc) + "\n";
+    
+    for (size_t i = 0; i < externs.size(); i++) {
+        result += externs[i]->to_string(indent + 4, i == externs.size() - 1);
     }
     return result;
 }
 
 // ProgramNode
 Value* ProgramNode::codegen() {
-    std::cerr << "Generating code for ProgramNode\n";
-    // Generate code for externs
     for (const auto& ext : externs) {
         if (!ext->codegen()) {
             std::cerr << "Error: Failed to generate code for extern\n";
@@ -220,7 +274,6 @@ Value* ProgramNode::codegen() {
         }
     }
     
-    // Generate code for declarations
     for (const auto& decl : declarations) {
         if (!decl->codegen()) {
             std::cerr << "Error: Failed to generate code for declarationp\n";
@@ -233,7 +286,6 @@ Value* ProgramNode::codegen() {
 
 // ExternNode
 Value* ExternNode::codegen() {
-    std::cerr << "Generating code for ExternNode: " << name << "\n";
     std::vector<Type*> ArgTypes;
     for (const auto& param : params) {
         Type* paramType = getTypeFromStr(param.first);
@@ -265,55 +317,61 @@ Value* ExternNode::codegen() {
 
 // VarDeclNode
 Value* VarDeclNode::codegen() {
-    std::cerr << "Generating code for VarDeclNode: " << name << "\n";
     llvm::Type* varType = getTypeFromStr(type);
     if (!varType) {
-        std::cerr << "Error: Unknown type for variable: " << type << "\n";
+        reportError("Unknown type in variable declaration: " + type, loc);
         return nullptr;
     }
 
-    // Check if we're in a function context
     llvm::Function* TheFunction = Builder.GetInsertBlock() ? Builder.GetInsertBlock()->getParent() : nullptr;
 
     if (TheFunction) {
         // Local variable
-        // Check if variable already exists in current scope
-        if (NamedValues.find(name) != NamedValues.end()) {
-            // Allow shadowing of outer scope variables
-            llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
-            NamedValues[name] = { Alloca, varType, false };
-            return Alloca;
-        } else {
-            llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
-            NamedValues[name] = { Alloca, varType, false };
-            return Alloca;
-        }
-    } else {
-        // Global variable
-        // Check if global variable already exists
-        if (TheModule->getGlobalVariable(name)) {
-            reportError("Redefinition of global variable '" + name + "'", loc);
+        auto& CurrentScope = NamedValuesStack.back();
+
+        // Check for redefinition in the current scope
+        if (CurrentScope.find(name) != CurrentScope.end()) {
+            Note note{
+                "previous declaration of '" + name + "' was here",
+                CurrentScope[name].declLocation
+            };
+            reportError("Redefinition of local variable '" + name + "'", loc, true, &note);
+            return nullptr;
         }
 
-        // Create global variable
+        // Create new alloca for the variable
+        llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
+
+        // Store the variable in the current scope
+        CurrentScope[name] = { Alloca, varType, false, loc };
+        return Alloca;
+    } else {
+        // Global variable handling remains the same
+        if (TheModule->getGlobalVariable(name)) {
+            Note note{
+                "previous declaration of '" + name + "' was here",
+                GlobalNamedValues[name].declLocation
+            };
+            reportError("Redefinition of global variable '" + name + "'", loc, true, &note);
+            return nullptr;
+        }
+
         llvm::GlobalVariable* GlobalVar = new llvm::GlobalVariable(
             *TheModule,
             varType,
-            false, // isConstant
+            false,
             llvm::GlobalValue::ExternalLinkage,
-            llvm::Constant::getNullValue(varType), // initializer
+            llvm::Constant::getNullValue(varType),
             name
         );
 
-        GlobalNamedValues[name] = { GlobalVar, varType, true };
+        GlobalNamedValues[name] = { GlobalVar, varType, true, loc };
         return GlobalVar;
     }
 }
 
-
 // FunctionNode 
 Value* FunctionNode::codegen() {
-    std::cerr << "Generating code for FunctionNode: " << name << "\n";
     
     // Create function type
     std::vector<Type*> ArgTypes;
@@ -333,15 +391,39 @@ Value* FunctionNode::codegen() {
     }
     
     FunctionType *FT = FunctionType::get(RetType, ArgTypes, false);
+    
+    // Add error checking for redefinition and type conflicts before creating the function
+    if (Function* existingFunc = TheModule->getFunction(name)) {
+        // Check for type mismatch with existing declaration
+        if (existingFunc->getFunctionType() != FT) {
+            Note note{
+                "previous declaration is here",
+                FunctionDeclarations[name].declLocation
+            };
+            reportError("conflicting types for '" + name + "'", loc, true, &note);
+        }
+        if (!existingFunc->empty()) {  // Has body, so it's a definition
+            Note note{
+                "previous definition is here",
+                FunctionDeclarations[name].declLocation
+            };
+            reportError("redefinition of '" + name + "'", loc, true, &note);
+        }
+        
+    }
+
     Function *F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
+    
+    // Store function declaration info for future error messages
+    FunctionDeclarations[name] = { F, loc };
     
     // Create basic block
     BasicBlock *BB = BasicBlock::Create(TheContext, "entry", F);
     Builder.SetInsertPoint(BB);
     
-    // Save the current scope
-    std::map<std::string, VariableInfo> OldNamedValues = NamedValues;
-    NamedValues.clear();
+    // Push a new scope for the function body
+    pushScope();
+    auto& CurrentScope = NamedValuesStack.back();
     
     // Set up parameters
     unsigned Idx = 0;
@@ -350,8 +432,20 @@ Value* FunctionNode::codegen() {
         llvm::Type* paramType = ArgTypes[Idx];
         AllocaInst *Alloca = CreateEntryBlockAlloca(F, params[Idx].second, paramType);
         Builder.CreateStore(&Arg, Alloca);
-        // Store VariableInfo in NamedValues
-        NamedValues[params[Idx].second] = { Alloca, paramType };
+
+        // Check for parameter name conflicts in the current scope
+        if (CurrentScope.find(params[Idx].second) != CurrentScope.end()) {
+            Note note{
+                "previous declaration of parameter '" + params[Idx].second + "' was here",
+                CurrentScope[params[Idx].second].declLocation
+            };
+            reportError("Duplicate parameter name '" + params[Idx].second + "'", loc, true, &note);
+            popScope();  // Clean up scope before returning
+            return nullptr;
+        }
+
+        // Store VariableInfo in CurrentScope
+        CurrentScope[params[Idx].second] = { Alloca, paramType, false, loc };
         Idx++;
     }
     
@@ -369,10 +463,11 @@ Value* FunctionNode::codegen() {
             // Verify the function
             verifyFunction(*F);
             // Restore the previous scope
-            NamedValues = OldNamedValues;
+            popScope();
             return F;
         } else {
             std::cerr << "Error: Failed to generate code for function body\n";
+            popScope();  // Clean up scope before returning
         }
     } else {
         std::cerr << "Error: Function body is missing\n";
@@ -380,52 +475,49 @@ Value* FunctionNode::codegen() {
     
     // Remove the function if codegen failed
     F->eraseFromParent();
-    // Restore the previous scope
-    NamedValues = OldNamedValues;
+    popScope();  // Clean up scope before returning
     return nullptr;
 }
 
 // BlockNode
 Value* BlockNode::codegen() {
-    std::cerr << "Generating code for BlockNode\n";
     Value* Last = nullptr;
-    
-    // Save the current scope
-    std::map<std::string, VariableInfo> OldNamedValues = NamedValues;
-    
+
+    // Push a new scope for the block
+    pushScope();
+
     // Generate code for declarations in new scope
     for (const auto& decl : declarations) {
         Last = decl->codegen();
         if (!Last) {
             std::cerr << "Error: Failed to generate code for declaration\n";
-            NamedValues = OldNamedValues;  // Restore scope before error return
+            popScope();  // Clean up scope before returning
             return nullptr;
         }
     }
-    
+
     // Generate code for statements
     for (const auto& stmt : statements) {
         Last = stmt->codegen();
         if (!Last) {
             std::cerr << "Error: Failed to generate code for statement\n";
-            NamedValues = OldNamedValues;  // Restore scope before error return
+            popScope();  // Clean up scope before returning
             return nullptr;
         }
-        
+
         // If block is terminated (e.g., by a return), stop generating more code
         if (Builder.GetInsertBlock()->getTerminator())
             break;
     }
-    
-    // Restore the previous scope
-    NamedValues = OldNamedValues;
-    
+
+    // Pop the block scope
+    popScope();
+
     return Last;
 }
 
 // IfNode modification
 Value* IfNode::codegen() {
-    std::cerr << "Generating code for IfNode\n";
     Value *CondV = condition->codegen();
     if (!CondV) {
         std::cerr << "Error: Failed to generate code for condition\n";
@@ -496,7 +588,6 @@ Value* IfNode::codegen() {
 
 // WhileNode modification
 Value* WhileNode::codegen() {
-    std::cerr << "Generating code for WhileNode\n";
     
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
 
@@ -558,20 +649,33 @@ Value* WhileNode::codegen() {
 
 // ReturnNode
 Value* ReturnNode::codegen() {
+    // Get function and its return type
+    Function* TheFunction = Builder.GetInsertBlock()->getParent();
+    Type* RetType = TheFunction->getReturnType();
+    std::string FuncName = TheFunction->getName().str();
+    
+    // If function returns void but we have a return value
+    if (RetType->isVoidTy() && value) {
+        reportError("void function '" + FuncName + "' cannot return a value", loc);
+        return nullptr;
+    }
+    
+    // If function doesn't return void but we don't have a return value
+    if (!RetType->isVoidTy() && !value) {
+        reportError("non-void function '" + FuncName + "' should return a value", loc);
+        return nullptr;
+    }
+
     Value* RetVal = nullptr;
     if (value) {
         RetVal = value->codegen();
         if (!RetVal) return nullptr;
 
-        // Get function's return type
-        Function* TheFunction = Builder.GetInsertBlock()->getParent();
-        Type* RetType = TheFunction->getReturnType();
-
-        // If the return value type does not match the function's return type, convert it
+        // If the return value type does not match the function's return type, try to convert it
         if (RetVal && RetVal->getType() != RetType) {
             RetVal = convertToType(RetVal, RetType, false, loc);
             if (!RetVal) {
-                std::cerr << "Error: Invalid type conversion in return\n";
+                // Let convertToType handle the specific type conversion error message
                 return nullptr;
             }
         }
@@ -582,7 +686,6 @@ Value* ReturnNode::codegen() {
 
 // ExprStmtNode
 Value* ExprStmtNode::codegen() {
-    std::cerr << "Generating code for ExprStmtNode\n";
     Value* Val = expr->codegen();
     if (!Val) {
         std::cerr << "Error: Failed to generate code for expression in ExprStmtNode\n";
@@ -593,9 +696,7 @@ Value* ExprStmtNode::codegen() {
 }
 
 // BinaryOpNode
-// BinaryOpNode
 Value* BinaryOpNode::codegen() {
-    std::cerr << "Generating code for BinaryOpNode: " << op << "\n";
 
     // Special handling for logical operators
     if (op == "&&" || op == "||") {
@@ -743,7 +844,6 @@ Value* BinaryOpNode::codegen() {
 
 // UnaryOpNode
 Value* UnaryOpNode::codegen() {
-    std::cerr << "Generating code for UnaryOpNode: " << op << "\n";
     Value* Val = operand->codegen();
     if (!Val) {
         std::cerr << "Error: Failed to generate code for operand\n";
@@ -795,24 +895,17 @@ Value* UnaryOpNode::codegen() {
 
 // AssignNode
 Value* AssignNode::codegen() {
-    std::cerr << "Generating code for AssignNode: " << name << "\n";
     Value* Val = value->codegen();
     if (!Val) {
         std::cerr << "Error: Failed to generate code for value\n";
         return nullptr;
     }
 
-    VariableInfo* varInfo = nullptr;
-    if (NamedValues.find(name) != NamedValues.end()) {
-        varInfo = &NamedValues[name];
-        std::cerr << "Found " << name << " in local scope\n";
-    } else if (GlobalNamedValues.find(name) != GlobalNamedValues.end()) {
-        varInfo = &GlobalNamedValues[name];
-        std::cerr << "Found " << name << " in global scope\n";
-    }
-
+    // Use findVariable to get the variable information
+    VariableInfo* varInfo = findVariable(name);
     if (!varInfo) {
-        reportError("Assignment to undeclared variable '" + name + "'", loc);
+        reportError("use of undeclared indentifier '" + name + "'", loc);
+        return nullptr;
     }
 
     // Handle all type conversions through convertToType
@@ -832,31 +925,19 @@ Value* AssignNode::codegen() {
 
 // VariableNode
 Value* VariableNode::codegen() {
-    std::cerr << "Generating code for VariableNode: " << name << "\n";
-    
-    // First check local variables
-    if (NamedValues.find(name) != NamedValues.end()) {
-        VariableInfo& varInfo = NamedValues[name];
-        return Builder.CreateLoad(varInfo.type, varInfo.value, name.c_str());
-    }
-    
-    // Then check global variables
-    if (GlobalNamedValues.find(name) != GlobalNamedValues.end()) {
-        VariableInfo& varInfo = GlobalNamedValues[name];
-        return Builder.CreateLoad(varInfo.type, varInfo.value, name.c_str());
+
+    // Use findVariable to get the variable information
+    VariableInfo* varInfo = findVariable(name);
+    if (!varInfo) {
+        reportError("Use of undeclared identifier '" + name + "'", loc);
+        return nullptr;
     }
 
-    // VariableNode::codegen()
-    if (NamedValues.find(name) == NamedValues.end() && 
-        GlobalNamedValues.find(name) == GlobalNamedValues.end()) {
-        reportError("Use of undeclared variable '" + name + "'", loc);
-    }
-    return nullptr;
+    // Load the variable value
+    return Builder.CreateLoad(varInfo->type, varInfo->value, name.c_str());
 }
-
 // FunctionCallNode
 Value* FunctionCallNode::codegen() {
-    std::cerr << "Generating code for FunctionCallNode: " << name << "\n";
     
     // Look up the name in the global module table.
     Function *CalleeF = TheModule->getFunction(name);
@@ -869,55 +950,64 @@ Value* FunctionCallNode::codegen() {
     size_t providedArgs = arguments.size();
     
     if (expectedArgs != providedArgs) {
-        // Create modified location pointing to the problematic argument
         TOKEN errorLoc = loc;
-        
-        // Calculate new column position:
-        // Start with function name position
-        int newCol = loc.columnNo;
-        
+        errorLoc.columnNo = loc.columnNo;  // Where "foo" starts
+        errorLoc.lexeme = name;  // Set lexeme to function name for highlighting
+
+        // Calculate caret position for the problematic argument
+        int caretCol;
         if (providedArgs > expectedArgs) {
-            // For too many args, point to the first extra argument
-            // Skip past function name and opening paren
-            newCol += name.length() + 1;  // +1 for '('
-            
-            // Skip past the valid arguments and their commas
+            // For too many args, put caret at first extra argument
+            caretCol = loc.columnNo + name.length() + 1;  // After "foo("
             for (size_t i = 0; i < expectedArgs; i++) {
-                // Add argument length and ", " separator
-                newCol += 2;  // For ", "
+                caretCol += 2;  // Skip past each valid argument and comma
             }
         } else {
-            // For too few args, point to where the next arg should be
-            // Skip to the end of the last provided argument
-            newCol += name.length() + 1;  // +1 for '('
+            // For too few args, put caret at end of last provided argument
+            caretCol = loc.columnNo + name.length() + 1;
             for (size_t i = 0; i < providedArgs; i++) {
-                newCol += 2;  // For ", "
+                caretCol += 2;  // Skip past each provided argument and comma
             }
         }
-        
-        errorLoc.columnNo = newCol;
 
+        // Create caret position - just the caret, no highlighting
+        CaretPosition caret{caretCol, false};
+        
         std::string msg;
         if (providedArgs > expectedArgs) {
-            msg = "too many arguments to function call, expected " + 
-                  std::to_string(expectedArgs) + " argument" +
-                  (expectedArgs != 1 ? "s" : "") + ", have " +
-                  std::to_string(providedArgs) + " arguments";
+            msg = "too many arguments to function call, expected " +
+                std::to_string(expectedArgs) + ", have " +
+                std::to_string(providedArgs);
         } else {
             msg = "too few arguments to function call, expected " +
-                  std::to_string(expectedArgs) + " argument" +
-                  (expectedArgs != 1 ? "s" : "") + ", have " +
-                  std::to_string(providedArgs) + " arguments";
+                std::to_string(expectedArgs) + ", have " +
+                std::to_string(providedArgs);
         }
-        reportError(msg, errorLoc);
-    }
 
+        Note note{
+            "function '" + name + "' declared here",
+            FunctionDeclarations[name].declLocation
+        };
+        
+        reportError(msg, errorLoc, true, &note, &caret);
+    }
     std::vector<Value *> ArgsV;
-    for (unsigned i = 0, e = arguments.size(); i != e; ++i) {
-        ArgsV.push_back(arguments[i]->codegen());
-        if (!ArgsV.back()) {
-            return nullptr;
+    auto funcArgsIt = CalleeF->arg_begin();  // Get iterator for function parameters
+
+    for (unsigned i = 0; i < arguments.size(); i++, ++funcArgsIt) {
+        Value* ArgVal = arguments[i]->codegen();
+        if (!ArgVal) return nullptr;
+
+        // Get the expected parameter type from the function declaration
+        Type* paramType = funcArgsIt->getType();
+        
+        // Convert argument to the parameter type if needed
+        if (ArgVal->getType() != paramType) {
+            ArgVal = convertToType(ArgVal, paramType, false, arguments[i]->loc);
+            if (!ArgVal) return nullptr;
         }
+        
+        ArgsV.push_back(ArgVal);
     }
 
     return Builder.CreateCall(CalleeF, ArgsV, "calltmp");
@@ -925,7 +1015,6 @@ Value* FunctionCallNode::codegen() {
 
 // LiteralNode
 Value* LiteralNode::codegen() {
-    std::cerr << "Generating code for LiteralNode: ";
     switch (type) {
         case LiteralType::Int:
             std::cerr << value.intValue << "\n";

@@ -11,15 +11,6 @@
 TOKEN CurTok;
 std::deque<TOKEN> tok_buffer;
 
-
-void checkToken(int expectedType, const std::string& context) {
-    if (CurTok.type != expectedType) {
-        reportError("Expected " + tokenTypeToString(expectedType) + 
-                   " but got " + tokenTypeToString(CurTok.type) + 
-                   " in " + context, CurTok);
-    }
-}
-
 // Keep the token management functions the same
 TOKEN getNextToken() {
     if (tok_buffer.empty())
@@ -28,16 +19,15 @@ TOKEN getNextToken() {
     TOKEN temp = tok_buffer.front();
     tok_buffer.pop_front();
 
-    fprintf(stderr, "getNextToken: \"%s\" with type %s (%d) at line %d\n", temp.lexeme.c_str(),
-            tokenTypeToString(temp.type).c_str(), temp.type, temp.lineNo);
     CurTok = temp;
     return CurTok;
 }
 
-void putBackToken(TOKEN tok) {
-    fprintf(stderr, "putBackToken: \"%s\" with type %s (%d) at line %d\n", tok.lexeme.c_str(),
-            tokenTypeToString(tok.type).c_str(), tok.type, tok.lineNo);
-    tok_buffer.push_front(tok);
+TOKEN peekNextToken() {
+    if (tok_buffer.empty()) {
+        tok_buffer.push_back(gettok());
+    }
+    return tok_buffer.front();
 }
 
 // First sets (keep only the ones we need)
@@ -46,11 +36,10 @@ std::unordered_set<int> FIRST_decl = {INT_TOK, FLOAT_TOK, BOOL_TOK, VOID_TOK};
 std::unordered_set<int> FIRST_extern = {EXTERN};
 std::unordered_set<int> FIRST_type_spec = {INT_TOK, FLOAT_TOK, BOOL_TOK, VOID_TOK};
 std::unordered_set<int> FIRST_expr = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, LPAR, NOT, MINUS};
-
-// Debug function to print the current function being called
-void debugPrint(const std::string& functionName) {
-    std::cerr << "Entering " << functionName << " at line " << CurTok.lineNo << "\n";
-}
+std::unordered_set<int> FOLLOW_stmt_list = {RBRA};
+std::unordered_set<int> FOLLOW_param_list = {RPAR};
+std::unordered_set<int> FOLLOW_arg_list = {RPAR};
+std::unordered_set<int> FOLLOW_local_decls = {IDENT, INT_LIT, FLOAT_LIT, BOOL_LIT, IF, WHILE, RETURN, LBRA, RBRA, SC, NOT, MINUS, LPAR};
 
 //program ::= extern_list decl_list 
 //          | decl_list
@@ -94,7 +83,6 @@ std::unique_ptr<ExternListNode> parseExternList() {
 // extern_list' ::= extern extern_list'
 //                | epsilon
 std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr<ASTnode>>&& externs, TOKEN loc) {
-    debugPrint("parseExternListPrime");
     
     if (CurTok.type == EXTERN) {
         auto nextExtern = parseExtern();
@@ -111,7 +99,6 @@ std::unique_ptr<ExternListNode> parseExternListPrime(std::vector<std::unique_ptr
 std::unique_ptr<DeclListNode> parseDeclList() {
     TOKEN loc = CurTok;  
     
-    debugPrint("parseDeclList");
     std::vector<std::unique_ptr<ASTnode>> declarations;
 
     auto firstDecl = parseDecl();
@@ -127,7 +114,6 @@ std::unique_ptr<DeclListNode> parseDeclList() {
 // decl_list' ::= decl decl_list'
 //              | epsilon
 std::unique_ptr<DeclListNode> parseDeclListPrime(std::vector<std::unique_ptr<ASTnode>> declarations, TOKEN loc) {
-    debugPrint("parseDeclListPrime");
     
     if (FIRST_decl.count(CurTok.type)) {
         auto nextDecl = parseDecl();
@@ -181,8 +167,12 @@ std::unique_ptr<ExternNode> parseExtern() {
     return std::make_unique<ExternNode>(returnType, name, std::move(*params), loc);
 }
 
+
+// decl ::= var_decl
+//        | fun_decl
+// var_decl ::= var_type IDENT ";"
+// fun_decl ::= type_spec IDENT "(" params ")" block
 std::unique_ptr<ASTnode> parseDecl() {
-    debugPrint("parseDecl");
     
     std::string returnType = parseTypeSpec();
     if (returnType.empty()) {
@@ -196,7 +186,7 @@ std::unique_ptr<ASTnode> parseDecl() {
         return nullptr;
     }
     
-    // Capture location here where we know we have an identifier
+    // Capture location for error messaging
     TOKEN loc = CurTok;
     std::string name = CurTok.lexeme;
     getNextToken();
@@ -235,7 +225,6 @@ std::unique_ptr<ASTnode> parseDecl() {
 
 // block ::= "{" local_decls stmt_list "}"
 std::unique_ptr<BlockNode> parseBlock() {
-    debugPrint("parseBlock");
     TOKEN loc = CurTok;
     if (CurTok.type != LBRA) {
         std::cerr << "Expected '{' at start of block\n";
@@ -265,11 +254,8 @@ std::unique_ptr<BlockNode> parseBlock() {
 // local_decls ::= local_decls local_decl
 //               | epsilon
 std::unique_ptr<DeclListNode> parseLocalDecls() {
-    debugPrint("parseLocalDecls");
     
-    // local_decls ::= local_decls local_decl | epsilon
-    if (!FIRST_type_spec.count(CurTok.type)) {
-        // epsilon production
+    if (FOLLOW_local_decls.count(CurTok.type)) {
         return std::make_unique<DeclListNode>(std::vector<std::unique_ptr<ASTnode>>());
     }
     
@@ -283,17 +269,16 @@ std::unique_ptr<DeclListNode> parseLocalDecls() {
 
 // local_decls' ::= local_decl local_decls' | epsilon
 std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<ASTnode>>&& decls) {
-    debugPrint("parseLocalDeclsPrime");
     
-    if (FIRST_type_spec.count(CurTok.type)) {
-        auto nextDecl = parseLocalDecl();
-        if (!nextDecl) return nullptr;
-        decls.push_back(std::move(nextDecl));
-        return parseLocalDeclsPrime(std::move(decls));
+    // Use FOLLOW set to check for epsilon production
+    if (FOLLOW_local_decls.count(CurTok.type)) {
+        return std::make_unique<DeclListNode>(std::move(decls));
     }
     
-    // epsilon production
-    return std::make_unique<DeclListNode>(std::move(decls));
+    auto nextDecl = parseLocalDecl();
+    if (!nextDecl) return nullptr;
+    decls.push_back(std::move(nextDecl));
+    return parseLocalDeclsPrime(std::move(decls));
 }
 
 // stmt ::= expr_stmt
@@ -302,7 +287,6 @@ std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<A
 //        | while_stmt
 //        | return_stmt
 std::unique_ptr<ASTnode> parseStmt() {
-    debugPrint("parseStmt");
     switch (CurTok.type) {
         case IF:
             return parseIfStmt();
@@ -326,11 +310,9 @@ std::unique_ptr<ASTnode> parseStmt() {
 // stmt_list ::= stmt_list stmt
 //             | epsilon
 std::vector<std::unique_ptr<ASTnode>> parseStmtList() {
-    debugPrint("parseStmtList");
     
-    // stmt_list ::= stmt_list stmt | epsilon
-    if (CurTok.type == RBRA) {
-        // epsilon production
+    //Check for epsilon production
+    if (FOLLOW_stmt_list.count(CurTok.type)) {
         return std::vector<std::unique_ptr<ASTnode>>();
     }
     
@@ -344,21 +326,19 @@ std::vector<std::unique_ptr<ASTnode>> parseStmtList() {
 
 //stmt_list' ::= stmt stmt_list' | epsilon
 std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique_ptr<ASTnode>>&& stmts) {
-    debugPrint("parseStmtListPrime");
     
-    if (CurTok.type != RBRA) {  // If we haven't reached the end of the block
+    if (CurTok.type != RBRA) {
         auto nextStmt = parseStmt();
         if (!nextStmt) return std::vector<std::unique_ptr<ASTnode>>();
         stmts.push_back(std::move(nextStmt));
         return parseStmtListPrime(std::move(stmts));
     }
-    
-    // epsilon production
+
     return stmts;
 }
 
+// if_stmt ::= "if" "(" expr ")" block else_stmt
 std::unique_ptr<IfNode> parseIfStmt() {
-    debugPrint("parseIfStmt");
     TOKEN loc = CurTok;
     getNextToken(); // consume IF
     
@@ -384,8 +364,9 @@ std::unique_ptr<IfNode> parseIfStmt() {
     return std::make_unique<IfNode>(std::move(condition), std::move(thenBlock), std::move(elseBlock), loc);
 }
 
+// expr_stmt ::= expr ";"
+//             | ";"
 std::unique_ptr<ASTnode> parseExprStmt() {
-    debugPrint("parseExprStmt");
     TOKEN loc = CurTok;
     auto expr = parseExpr();
     if (!expr) return nullptr;
@@ -396,8 +377,9 @@ std::unique_ptr<ASTnode> parseExprStmt() {
     return std::make_unique<ExprStmtNode>(std::move(expr), loc);
 }
 
+// return_stmt ::= "return" ";"
+//               | "return" expr ";"
 std::unique_ptr<ReturnNode> parseReturnStmt() {
-    debugPrint("parseReturnStmt");
     
     TOKEN loc = CurTok;
 
@@ -417,15 +399,16 @@ std::unique_ptr<ReturnNode> parseReturnStmt() {
     return std::make_unique<ReturnNode>(std::move(expr), loc);
 }
 
+// relation ::= additive relation'
 std::unique_ptr<ASTnode> parseRelational() {
-    debugPrint("parseRelational");
     auto left = parseAdditive();
     if (!left) return nullptr;
     return parseRelationalPrime(std::move(left));
 }
 
+// relation' ::= ("<=" | "<" | ">=" | ">") additive relation'
+//             | epsilon
 std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseRelationalPrime");
     if (CurTok.type == LT || CurTok.type == GT || 
         CurTok.type == LE || CurTok.type == GE) {
         std::string op;
@@ -445,15 +428,16 @@ std::unique_ptr<ASTnode> parseRelationalPrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// equality ::= relation equality'
 std::unique_ptr<ASTnode> parseEquality() {
-    debugPrint("parseEquality");
     auto left = parseRelational();
     if (!left) return nullptr;
     return parseEqualityPrime(std::move(left));
 }
 
+// equality' ::= ("==" | "!=") relation equality'
+//             | epsilon
 std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseEqualityPrime");
     if (CurTok.type == EQ || CurTok.type == NE) {
         TOKEN loc = CurTok;;
         std::string op = CurTok.type == EQ ? "==" : "!=";
@@ -466,15 +450,16 @@ std::unique_ptr<ASTnode> parseEqualityPrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// logic_and ::= equality logic_and'
 std::unique_ptr<ASTnode> parseLogicAnd() {
-    debugPrint("parseLogicAnd");
     auto left = parseEquality();
     if (!left) return nullptr;
     return parseLogicAndPrime(std::move(left));
 }
 
+// logic_and' ::= "&&" equality logic_and'
+//              | epsilon
 std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseLogicAndPrime");
     if (CurTok.type == AND) {
         TOKEN loc = CurTok;;
         getNextToken();
@@ -488,7 +473,6 @@ std::unique_ptr<ASTnode> parseLogicAndPrime(std::unique_ptr<ASTnode> left) {
 
 // logic_or ::= logic_and logic_or'
 std::unique_ptr<ASTnode> parseLogicOr() {
-    debugPrint("parseLogicOr");
     auto left = parseLogicAnd();
     if (!left) return nullptr;
     return parseLogicOrPrime(std::move(left));
@@ -497,7 +481,6 @@ std::unique_ptr<ASTnode> parseLogicOr() {
 // logic_or' ::= "||" logic_and logic_or'
 //             | epsilon
 std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseLogicOrPrime");
     if (CurTok.type == OR) {
         TOKEN loc = CurTok;;
         getNextToken();
@@ -509,36 +492,40 @@ std::unique_ptr<ASTnode> parseLogicOrPrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// expr ::= assign_expr
 std::unique_ptr<ASTnode> parseExpr() {
     return parseAssignExpr();
 }
 
+// assign_expr ::= IDENT "=" assign_expr  
+//               | logic_or
 std::unique_ptr<ASTnode> parseAssignExpr() {
     if (CurTok.type == IDENT) {
-        TOKEN loc = CurTok;;
-        TOKEN savedTok = CurTok;
-        getNextToken();
-        if (CurTok.type == ASSIGN) {
-            getNextToken();
+        TOKEN loc = CurTok;
+        TOKEN idTok = CurTok;
+        TOKEN nextTok = peekNextToken();
+        
+        if (nextTok.type == ASSIGN) {
+            getNextToken();  // consume IDENT
+            getNextToken();  // consume =
             auto rhs = parseAssignExpr();
             if (!rhs) return nullptr;
-            return std::make_unique<AssignNode>(savedTok.lexeme, std::move(rhs), loc);
+            return std::make_unique<AssignNode>(idTok.lexeme, std::move(rhs), loc);
         }
-        putBackToken(CurTok);
-        CurTok = savedTok;
     }
     return parseLogicOr();
 }
 
+// additive ::= multiply additive'
 std::unique_ptr<ASTnode> parseAdditive() {
-    debugPrint("parseAdditive");
     auto left = parseMultiply();
     if (!left) return nullptr;
     return parseAdditivePrime(std::move(left));
 }
 
+// additive' ::= ("+" | "-") multiply additive'
+//             | epsilon
 std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseAdditivePrime");
     if (CurTok.type == PLUS || CurTok.type == MINUS) {
         std::string op = CurTok.type == PLUS ? "+" : "-";
         TOKEN loc = CurTok;;
@@ -551,15 +538,16 @@ std::unique_ptr<ASTnode> parseAdditivePrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// multiply ::= unary multiply'
 std::unique_ptr<ASTnode> parseMultiply() {
-    debugPrint("parseMultiply");
     auto left = parseUnary();
     if (!left) return nullptr;
     return parseMultiplyPrime(std::move(left));
 }
 
+// multiply' ::= ("*" | "/" | "%") unary multiply'
+//             | epsilon
 std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
-    debugPrint("parseMultiplyPrime");
     if (CurTok.type == ASTERIX || CurTok.type == DIV || CurTok.type == MOD) {
         std::string op;
         switch (CurTok.type) {
@@ -577,8 +565,13 @@ std::unique_ptr<ASTnode> parseMultiplyPrime(std::unique_ptr<ASTnode> left) {
     return left;
 }
 
+// primary ::= "(" expr ")"
+//           | IDENT
+//           | IDENT "(" args ")"
+//           | INT_LIT
+//           | FLOAT_LIT
+//           | BOOL_LIT
 std::unique_ptr<ASTnode> parsePrimary() {
-    debugPrint("parsePrimary");
     switch (CurTok.type) {
         case IDENT: {
             std::string name = CurTok.lexeme;
@@ -633,14 +626,15 @@ std::unique_ptr<ASTnode> parsePrimary() {
     }
 }
 
+// unary ::= ("-" | "!") unary
+//         | primary
 std::unique_ptr<ASTnode> parseUnary() {
-    debugPrint("parseUnary");
     if (CurTok.type == MINUS || CurTok.type == NOT) {
         std::string op = (CurTok.type == MINUS) ? "-" : "!";
         TOKEN loc = CurTok;;
-        getNextToken(); // Consume the unary operator
+        getNextToken();
         
-        auto operand = parseUnary(); // Recursive call to handle nested unary expressions
+        auto operand = parseUnary(); // Recursively parse nested unary expressions
         if (!operand) return nullptr;
         
         return std::make_unique<UnaryOpNode>(op, std::move(operand), loc);
@@ -649,8 +643,8 @@ std::unique_ptr<ASTnode> parseUnary() {
     return parsePrimary(); // If no unary operator, parse as primary expression
 }
 
+// local_decl ::= var_type IDENT ";"
 std::unique_ptr<ASTnode> parseLocalDecl() {
-    debugPrint("parseLocalDecl");
     std::string type = parseTypeSpec();
     if (type.empty()) return nullptr;
     
@@ -665,9 +659,9 @@ std::unique_ptr<ASTnode> parseLocalDecl() {
     return std::make_unique<VarDeclNode>(type, name, loc);
 }
 
-// Helper functions
+// type_spec ::= "void"
+//             | var_type
 std::string parseTypeSpec() {
-    debugPrint("parseTypeSpec");
     std::string type = CurTok.lexeme;  // Get the type name BEFORE checking
     
     if (!FIRST_type_spec.count(CurTok.type)) {
@@ -679,8 +673,8 @@ std::string parseTypeSpec() {
     return type;
 }
 
+// while_stmt ::= "while" "(" expr ")" stmt
 std::unique_ptr<WhileNode> parseWhile() {
-    debugPrint("parseWhile");
     TOKEN loc = CurTok;
     getNextToken(); // consume WHILE
     
@@ -699,22 +693,21 @@ std::unique_ptr<WhileNode> parseWhile() {
     }
     getNextToken();
     
-    // This matches the grammar production "while_stmt ::= while ( expr ) stmt"
     auto body = parseStmt();  
     if (!body) return nullptr;
     
     return std::make_unique<WhileNode>(std::move(condition), std::move(body), loc);
 }
 
+// params ::= param_list
+//          | "void"
+//          | epsilon
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
-    debugPrint("parseParams");
     
-    // Handle empty parameter list
-    if (CurTok.type == RPAR) {
+    if (FOLLOW_param_list.count(CurTok.type)) {
         return std::vector<std::pair<std::string, std::string>>();
     }
     
-    // Handle void parameter
     if (CurTok.type == VOID_TOK) {
         getNextToken();
         return std::vector<std::pair<std::string, std::string>>();
@@ -723,8 +716,8 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParams() {
     return parseParamList();
 }
 
+// param ::= var_type IDENT
 std::optional<std::pair<std::string, std::string>> parseParam() {
-    debugPrint("parseParam");
     
     if (!FIRST_type_spec.count(CurTok.type)) {
         std::cerr << "Expected type specifier in parameter\n";
@@ -744,11 +737,10 @@ std::optional<std::pair<std::string, std::string>> parseParam() {
     return std::make_pair(type, name);
 }
 
+// param_list ::= param param_list'
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParamList() {
-    debugPrint("parseParamList");
     std::vector<std::pair<std::string, std::string>> params;
     
-    // param_list ::= param param_list'
     auto firstParam = parseParam();
     if (!firstParam) {
         std::cerr << "Error parsing first parameter\n";
@@ -759,12 +751,11 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParamList()
     return parseParamListPrime(std::move(params));
 }
 
+// param_list' ::= "," param param_list'
+//               | epsilon
 std::optional<std::vector<std::pair<std::string, std::string>>> parseParamListPrime(
     std::vector<std::pair<std::string, std::string>>&& params) {
-    debugPrint("parseParamListPrime");
     
-    // param_list' ::= "," param param_list'
-    //               | epsilon
     if (CurTok.type == COMMA) {
         getNextToken();
         auto nextParam = parseParam();
@@ -780,16 +771,12 @@ std::optional<std::vector<std::pair<std::string, std::string>>> parseParamListPr
     return params;
 }
 std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgList() {
-    debugPrint("parseArgList");
 
-    // Handle epsilon production for args ::= epsilon
-    if (CurTok.type == RPAR) {
+    if (FOLLOW_arg_list.count(CurTok.type)) {
         return std::vector<std::unique_ptr<ASTnode>>();
     }
     
-    // Otherwise parse arg_list
     std::vector<std::unique_ptr<ASTnode>> args;
-    
     auto firstArg = parseExpr();
     if (!firstArg) return std::nullopt;
     args.push_back(std::move(firstArg));
@@ -806,11 +793,10 @@ std::optional<std::vector<std::unique_ptr<ASTnode>>> parseArgListPrime(
         args.push_back(std::move(nextArg));
         return parseArgListPrime(std::move(args));
     }
-    return args;  // epsilon production
+    return args;
 }
 
 std::unique_ptr<ASTnode> parser() {
-    debugPrint("parser");
     auto program = parseProgram();
     if (program) {
         std::cout << "Parsing Finished\n";

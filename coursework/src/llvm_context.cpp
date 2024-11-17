@@ -2,6 +2,9 @@
 #include "error_handler.h"
 
 
+std::map<std::string, FunctionInfo> FunctionDeclarations;
+std::vector<std::map<std::string, VariableInfo>> NamedValuesStack = {{}};
+
 // Helper function implementations
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                         const std::string &VarName,
@@ -61,11 +64,6 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
 
     // Narrowing conversions (generate errors):
     
-    // Float to Int
-    if (sourceType->isFloatTy() && targetType->isIntegerTy()) {
-        reportError("Cannot convert float to int (narrowing conversion)", loc);
-        return nullptr;
-    }
 
     // Unsupported type conversions
     std::string sourceTypeName = sourceType->isIntegerTy() ? "int" :
@@ -77,9 +75,43 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
                                  targetType->isIntegerTy(1) ? "bool" :
                                  "unknown";
 
+    // Float to Int
+    if (sourceType->isFloatTy() && targetType->isIntegerTy()) {
+        reportError("implicit conversion from '" + sourceTypeName + "' to '" + 
+                   targetTypeName + "' may lose precision", loc);
+        return nullptr;
+    }
     std::string errorMessage = "Unsupported type conversion from " + sourceTypeName + 
                                 " to " + targetTypeName;
     reportError(errorMessage, loc);
     
+    return nullptr;
+}
+
+void pushScope() {
+    NamedValuesStack.emplace_back();
+}
+
+void popScope() {
+    if (!NamedValuesStack.empty()) {
+        NamedValuesStack.pop_back();
+    } else {
+        // Handle error: popping from empty scope stack
+    }
+}
+
+VariableInfo* findVariable(const std::string& name) {
+    // Search from innermost scope to outermost
+    for (auto scopeIt = NamedValuesStack.rbegin(); scopeIt != NamedValuesStack.rend(); ++scopeIt) {
+        auto varIt = scopeIt->find(name);
+        if (varIt != scopeIt->end()) {
+            return &varIt->second;
+        }
+    }
+    // Check global variables
+    auto globalVarIt = GlobalNamedValues.find(name);
+    if (globalVarIt != GlobalNamedValues.end()) {
+        return &globalVarIt->second;
+    }
     return nullptr;
 }

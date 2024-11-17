@@ -66,12 +66,26 @@ std::unique_ptr<DeclListNode> parseLocalDeclsPrime(std::vector<std::unique_ptr<A
 std::vector<std::unique_ptr<ASTnode>> parseStmtList();
 std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique_ptr<ASTnode>>&& stmts);
 
-// First sets
+// FIRST sets declarations
 extern std::unordered_set<int> FIRST_program;
 extern std::unordered_set<int> FIRST_decl;
 extern std::unordered_set<int> FIRST_extern;
 extern std::unordered_set<int> FIRST_type_spec;
 extern std::unordered_set<int> FIRST_expr;
+extern std::unordered_set<int> FIRST_stmt;
+extern std::unordered_set<int> FIRST_primary;
+extern std::unordered_set<int> FIRST_unary;
+extern std::unordered_set<int> FIRST_assign_expr;
+
+// FOLLOW sets declarations for non-terminals with ε productions
+extern std::unordered_set<int> FOLLOW_stmt_list;
+extern std::unordered_set<int> FOLLOW_local_decls;
+extern std::unordered_set<int> FOLLOW_expr_stmt;
+extern std::unordered_set<int> FOLLOW_params;
+extern std::unordered_set<int> FOLLOW_args;
+
+bool isInFirst(int token, const std::unordered_set<int>& firstSet);
+bool isInFollow(int token, const std::unordered_set<int>& followSet);
 
 std::unique_ptr<ASTnode> parser();
 

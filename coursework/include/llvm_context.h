@@ -30,6 +30,8 @@
 #include <string>
 #include <iostream>
 #include "tokens.h"
+#include <vector>
+#include "llvm/IR/Value.h"
 
 extern llvm::LLVMContext TheContext;
 extern llvm::IRBuilder<> Builder;
@@ -40,10 +42,22 @@ struct VariableInfo {
     llvm::Value* value;  // Can be either AllocaInst* or GlobalVariable*
     llvm::Type* type;
     bool isGlobal;
+    TOKEN declLocation;
 };
 
-extern std::map<std::string, VariableInfo> NamedValues;    // Local variables
+struct FunctionInfo {
+    llvm::Function* function;
+    TOKEN declLocation;
+    std::vector<std::pair<std::string, TOKEN>> paramLocations;
+};
+
+extern std::vector<std::map<std::string, VariableInfo>> NamedValuesStack; //Local variables
 extern std::map<std::string, VariableInfo> GlobalNamedValues;   // Global variables
+extern std::map<std::string, FunctionInfo> FunctionDeclarations;
+
+void pushScope();
+void popScope();
+VariableInfo* findVariable(const std::string& name);
 
 // Helper function declarations
 inline llvm::Type* getTypeFromStr(const std::string& type) {

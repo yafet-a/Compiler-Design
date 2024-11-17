@@ -13,35 +13,15 @@ using namespace llvm;
 // Base AST node class
 class ASTnode {
 protected:
-    TOKEN loc;
+    static std::string getPrefix(int indent, bool isLast);
+    static std::string getChildIndent(int indent, bool isLast);
+
 public:
+    TOKEN loc;
     virtual ~ASTnode() {}
     virtual Value* codegen() = 0;
     virtual std::string to_string(int indent = 0, bool isLast = true) const {
         return std::string(indent, ' ') + "ASTnode\n";
-    }
-
-protected:
-    std::string getPrefix(int indent, bool isLast) const {
-        if (indent == 0) return "";
-        std::string result;
-        // Add vertical lines for all parent levels
-        for (int i = 3; i < indent - 3; i += 3) {
-            result += "│  ";
-        }
-        // Use different symbols for last vs non-last items
-        result += isLast ? "└─ " : "├─ ";
-        return result;
-    }
-
-    std::string getChildIndent(int indent, bool isLast) const {
-        if (indent == 0) return "";
-        std::string result;
-        // Add vertical lines for all levels except the last
-        for (int i = 3; i < indent; i += 3) {
-            result += (i < indent - 3) ? "│  " : (isLast ? "   " : "│  ");
-        }
-        return result;
     }
 };
 
