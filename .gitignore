@@ -10,7 +10,7 @@ mccomp
 #VSCode C++ Settings
 .vscode/
 
-# Ignore binaries in specific directories
-minic-medium-tests/*/*
-tests/*/*
-cult-tests/*/*
+#binaries
+cult-tests/**/*
+minic-medium-tests/**/*
+tests/**/*
