@@ -13,3 +13,4 @@ mccomp
 # Ignore binaries in specific directories
 minic-medium-tests/*/*
 tests/*/*
+cult-tests/*/*

@@ -8,6 +8,7 @@ CLANG=$LLVM_INSTALL_PATH/bin/clang++
 module load GCC/13.3.0
 
 DIR="$(pwd)"
+TEST_DIR="$DIR/Alex-Tests/scope_errors"
 
 ### Build mccomp compiler
 echo "Cleanup *****"
@@ -15,90 +16,70 @@ rm -rf ./mccomp
 
 echo "Compile *****"
 
-make clean
+make clean || true  # Ignore error if 'clean' doesn't exist
 make -j mccomp
 
 COMP=$DIR/mccomp
-echo $COMP
+echo "Compiler: $COMP"
 
+function run_test {
+  local test_dir=$1
+  local test_name=$2
+  local expected_outcome=$3
 
-echo "Test *****"
+  cd $test_dir
+  pwd
+  rm -rf output.ll $test_name
 
-scope_error01=1
-scope_error02=1
-scope_error03=1
-scope_error04=1
-scope_error05=1
-scope_error06=1
-scope_error07=1
+  echo "Compiling $test_name.c with mccomp..."
+  if "$COMP" ./$test_name.c; then
+    echo "Compilation succeeded."
+    echo "$expected_outcome"
+  else
+    echo "Compilation failed."
+    echo "$expected_outcome"
+  fi
 
+  cd $DIR
+}
 
+function list_options {
+  echo "Select a test to run:"
+  echo "1) scope_error01"
+  echo "2) scope_error02"
+  echo "3) scope_error03"
+  echo "4) scope_error04"
+  echo "5) scope_error05"
+  echo "6) scope_error06"
+  echo "7) scope_error07"
+  echo "8) Run all tests"
+  echo "q) Quit"
+}
 
-cd tests/scope_errors/scope_error01
+function run_all_tests {
+  run_test "$TEST_DIR/scope_error01" "scope_error01" "Should succeed"
+  run_test "$TEST_DIR/scope_error02" "scope_error02" "Should fail as y is not defined"
+  run_test "$TEST_DIR/scope_error03" "scope_error03" "Should fail as function is not defined"
+  run_test "$TEST_DIR/scope_error04" "scope_error04" "Should fail as y is not defined"
+  run_test "$TEST_DIR/scope_error05" "scope_error05" "Should fail as y is not defined in this scope"
+  run_test "$TEST_DIR/scope_error06" "scope_error06" "Should fail as y is not defined"
+  run_test "$TEST_DIR/scope_error07" "scope_error07" "Should succeed"
+}
 
-if [ $scope_error01 == 1 ]
-then	
-	cd ../scope_error01/
-	pwd
-	rm -rf output.ll scope_error01
-	"$COMP" ./scope_error01.c
-	echo "Should succeed"
+while true; do
+  list_options
+  read -p "Enter your choice: " choice
 
-fi
-
-if [ $scope_error02 == 1 ]
-then	
-	cd ../scope_error02/
-	pwd
-	rm -rf output.ll scope_error02
-	"$COMP" ./scope_error02
-	echo "Should fail as y is not defined"
-
-fi
-
-if [ $scope_error03 == 1 ]
-then	
-	cd ../scope_error03/
-	pwd
-	rm -rf output.ll scope_error03
-	"$COMP" ./scope_error03
-	echo "Should fail as function is not defined"
-fi
-
-if [ $scope_error04 == 1 ]
-then	
-	cd ../scope_error04/
-	pwd
-	rm -rf output.ll scope_error04
-	"$COMP" ./scope_error04
-	echo "Should fail as y is not defined"
-fi
-
-if [ $scope_error05 == 1 ]
-then	
-	cd ../scope_error05/
-	pwd
-	rm -rf output.ll scope_error05
-	"$COMP" ./scope_error05
-	echo "Should fail as y is not defined in this scope"
-fi
-
-if [ $scope_error06 == 1 ]
-then	
-	cd ../scope_error06/
-	pwd
-	rm -rf output.ll scope_error06
-	"$COMP" ./scope_error06
-	echo "Should fail as y is not defined"
-fi
-
-if [ $scope_error07 == 1 ]
-then	
-	cd ../scope_error07/
-	pwd
-	rm -rf output.ll scope_error07
-	"$COMP" ./scope_error07
-	echo "Should succeed"
-fi
-
-
+  case $choice in
+    1) run_test "$TEST_DIR/scope_error01" "scope_error01" "Should succeed" ;;
+    2) run_test "$TEST_DIR/scope_error02" "scope_error02" "Should fail as y is not defined" ;;
+    3) run_test "$TEST_DIR/scope_error03" "scope_error03" "Should fail as function is not defined" ;;
+    4) run_test "$TEST_DIR/scope_error04" "scope_error04" "Should fail as y is not defined" ;;
+    5) run_test "$TEST_DIR/scope_error05" "scope_error05" "Should fail as y is not defined in this scope" ;;
+    6) run_test "$TEST_DIR/scope_error06" "scope_error06" "Should fail as y is not defined" ;;
+    7) run_test "$TEST_DIR/scope_error07" "scope_error07" "Should succeed" ;;
+    8) run_all_tests ;;
+    q) echo "Exiting."; exit 0 ;;
+    *) echo "Invalid choice. Please try again." ;;
+  esac
+done

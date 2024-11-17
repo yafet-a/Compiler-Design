@@ -1,43 +1,46 @@
-FOLLOW(additive) = { !=, &&, ), ,, ;, <, <=, ==, >, >=, || }
-FOLLOW(additive') = { !=, &&, ), ,, ;, <, <=, ==, >, >=, || }
-FOLLOW(arg_list) = { ) }
-FOLLOW(arg_list') = { ) }
-FOLLOW(args) = { ) }
-FOLLOW(assign_expr) = { ), , , ; }
-FOLLOW(block) = { !, $, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, else, float, if, int, return, void, while, {, } }
-FOLLOW(decl) = { $, bool, float, int, void }
-FOLLOW(decl_list) = { $ }
-FOLLOW(decl_list') = { $ }
-FOLLOW(else_stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(equality) = { &&, ), ,, ;, || }
-FOLLOW(equality') = { &&, ), ,, ;, || }
-FOLLOW(expr) = { ), ,, ; }
-FOLLOW(expr_stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(extern_list) = { bool, float, int, void }
-FOLLOW(extern_list') = { bool, float, int, void }
-FOLLOW(fun_decl) = { $, bool, float, int, void }
-FOLLOW(if_stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(local_decl) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, bool, float, if, int, return, while, {, } }
-FOLLOW(local_decls) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(logic_and) = { ), ,, ;, || }
-FOLLOW(logic_and') = { ), ,, ;, || }
-FOLLOW(logic_or) = { ), ,, ; }
-FOLLOW(logic_or') = { ), ,, ; }
-FOLLOW(multiply) = { !=, &&, ), +, ,, -, ;, <, <=, ==, >, >=, || }
-FOLLOW(multiply') = { !=, &&, ), +, ,, -, ;, <, <=, ==, >, >=, || }
-FOLLOW(param) = { ), , }
-FOLLOW(param_list) = { ) }
-FOLLOW(param_list') = { ) }
-FOLLOW(params) = { ) }
-FOLLOW(primary) = { !=, %, &&, ), *, +, ,, -, /, ;, <, <=, ==, >, >=, || }
-FOLLOW(program) = { $ }
-FOLLOW(relation) = { !=, &&, ), ,, ;, ==, || }
-FOLLOW(relation') = { !=, &&, ), ,, ;, ==, || }
-FOLLOW(return_stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
-FOLLOW(stmt_list) = { } }
-FOLLOW(type_spec) = { IDENT }
-FOLLOW(unary) = { !=, %, &&, ), *, +, ,, -, /, ;, <, <=, ==, >, >=, || }
-FOLLOW(var_decl) = { $, bool, float, int, void }
-FOLLOW(var_type) = { IDENT }
-FOLLOW(while_stmt) = { !, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, } }
+FOLLOW(program) = {$}
+FOLLOW(extern_list) = {bool, float, int, void}
+FOLLOW(extern_list') = {bool, float, int, void}
+FOLLOW(extern) = {"extern", bool, float, int, void}
+FOLLOW(decl_list) = {$}
+FOLLOW(decl_list') = {$}
+FOLLOW(decl) = {$, bool, float, int, void}
+FOLLOW(var_decl) = {$, bool, float, int, void}
+FOLLOW(type_spec) = {IDENT}
+FOLLOW(var_type) = {IDENT}
+FOLLOW(fun_decl) = {$, bool, float, int, void}
+FOLLOW(params) = {)}
+FOLLOW(param_list) = {)}
+FOLLOW(param_list') = {)}
+FOLLOW(param) = {), ,}
+FOLLOW(block) = {!, $, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, bool, else, float, if, int, return, void, while, {, }}
+FOLLOW(local_decls) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {}
+FOLLOW(local_decls') = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {}
+FOLLOW(local_decl) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, bool, float, if, int, return, while, {}
+FOLLOW(stmt_list) = {}}
+FOLLOW(stmt_list') = {}}
+FOLLOW(stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(expr_stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(while_stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(if_stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(else_stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(return_stmt) = {!, (, -, ;, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT, if, return, while, {, }}
+FOLLOW(expr) = {), ,, ;}
+FOLLOW(assign_expr) = {), ,, ;}
+FOLLOW(logic_or) = {), ,, ;}
+FOLLOW(logic_or') = {), ,, ;}
+FOLLOW(logic_and) = {), ,, ;, ||}
+FOLLOW(logic_and') = {), ,, ;, ||}
+FOLLOW(equality) = {&&, ), ,, ;, ||}
+FOLLOW(equality') = {&&, ), ,, ;, ||}
+FOLLOW(relation) = {!=, &&, ), ,, ;, ==, ||}
+FOLLOW(relation') = {!=, &&, ), ,, ;, ==, ||}
+FOLLOW(additive) = {!=, &&, ), ,, ;, <, <=, ==, >, >=, ||}
+FOLLOW(additive') = {!=, &&, ), ,, ;, <, <=, ==, >, >=, ||}
+FOLLOW(multiply) = {!=, &&, ), +, ,, -, ;, <, <=, ==, >, >=, ||}
+FOLLOW(multiply') = {!=, &&, ), +, ,, -, ;, <, <=, ==, >, >=, ||}
+FOLLOW(unary) = {!=, %, &&, ), *, +, ,, -, /, ;, <, <=, ==, >, >=, ||}
+FOLLOW(primary) = {!=, %, &&, ), *, +, ,, -, /, ;, <, <=, ==, >, >=, ||}
+FOLLOW(args) = {)}
+FOLLOW(arg_list) = {)}
+FOLLOW(arg_list') = {)}
