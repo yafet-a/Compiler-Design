@@ -39,7 +39,7 @@ extern std::unique_ptr<llvm::Module> TheModule;
 
 // Symbol tables
 struct VariableInfo {
-    llvm::Value* value;  // Can be either AllocaInst* or GlobalVariable*
+    llvm::Value* value;
     llvm::Type* type;
     bool isGlobal;
     TOKEN declLocation;
@@ -59,7 +59,7 @@ void pushScope();
 void popScope();
 VariableInfo* findVariable(const std::string& name);
 
-// Helper function declarations
+
 inline llvm::Type* getTypeFromStr(const std::string& type) {
     if (type == "int") return llvm::Type::getInt32Ty(TheContext);
     if (type == "float") return llvm::Type::getFloatTy(TheContext);
@@ -68,7 +68,6 @@ inline llvm::Type* getTypeFromStr(const std::string& type) {
     return nullptr;
 }
 
-// Function declarations
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction, 
                                         const std::string &VarName,
                                         llvm::Type *VarType);

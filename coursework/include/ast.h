@@ -9,9 +9,14 @@
 
 using namespace llvm;
 
-
-// Base AST node class
-class ASTnode {
+/**
+* @brief Base class for all Abstract Syntax Tree nodes
+* 
+* @details
+* Derived classes implement codegen() for LLVM IR generation and to_string() 
+* for AST visualisation like the coursework pdf suggested.
+* Also added the token info so that each node stores its source location (line, column) for error reporting.
+*/class ASTnode {
 protected:
     static std::string getPrefix(int indent, bool isLast);
     static std::string getChildIndent(int indent, bool isLast);
@@ -25,8 +30,6 @@ public:
     }
 };
 
-
-// Type node
 class TypeNode : public ASTnode {
     std::string typeName;
 public:
@@ -38,7 +41,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Program node - represents the entire program
 class ProgramNode : public ASTnode {
     std::vector<std::unique_ptr<ASTnode>> externs;
     std::vector<std::unique_ptr<ASTnode>> declarations;
@@ -53,7 +55,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// External declaration node
 class ExternNode : public ASTnode {
     std::string type;
     std::string name;
@@ -69,7 +70,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Variable declaration node
 class VarDeclNode : public ASTnode {
     std::string type;
     std::string name;
@@ -83,7 +83,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Function declaration node
 class FunctionNode : public ASTnode {
     std::string returnType;
     std::string name;
@@ -101,7 +100,7 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Block node
+
 class BlockNode : public ASTnode {
     std::vector<std::unique_ptr<ASTnode>> declarations;
     std::vector<std::unique_ptr<ASTnode>> statements;
@@ -116,7 +115,7 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// Statement nodes
+
 class IfNode : public ASTnode {
     std::unique_ptr<ASTnode> condition;
     std::unique_ptr<ASTnode> thenBlock;
@@ -147,7 +146,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// ExternList node
 class ExternListNode : public ASTnode {
 public:
     std::vector<std::unique_ptr<ASTnode>> externs;
@@ -161,7 +159,6 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-// DeclList node
 class DeclListNode : public ASTnode {
 public:
     std::vector<std::unique_ptr<ASTnode>> declarations;
@@ -295,4 +292,4 @@ public:
     std::string to_string(int indent = 0, bool isLast = true) const override;
 };
 
-#endif // AST_H
+#endif

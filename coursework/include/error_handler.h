@@ -14,7 +14,6 @@ struct CaretPosition {
     bool useDefaultHighlight;
 };
 
-// The main error reporting function
 [[noreturn]] void reportError(const std::string& message, 
                              const TOKEN& token,
                              bool withHighlighting = true,
@@ -22,4 +21,4 @@ struct CaretPosition {
                              const CaretPosition* mainCaret = nullptr,
                              const CaretPosition* noteCaret = nullptr);
                              
-#endif // ERROR_HANDLER_H
+#endif

@@ -19,6 +19,8 @@ void putBackToken(TOKEN tok);
 std::unique_ptr<ProgramNode> parseProgram();
 std::unique_ptr<ExternNode> parseExtern();
 std::unique_ptr<ASTnode> parseDecl();
+std::unique_ptr<ASTnode> parseVarDecl(const std::string& type, const std::string& name, const TOKEN& loc);
+std::unique_ptr<ASTnode> parseFunDecl(const std::string& returnType, const std::string& name, const TOKEN& loc);
 std::unique_ptr<BlockNode> parseBlock();
 std::unique_ptr<ASTnode> parseStmt();
 std::unique_ptr<IfNode> parseIfStmt();
@@ -69,24 +71,15 @@ std::vector<std::unique_ptr<ASTnode>> parseStmtListPrime(std::vector<std::unique
 // FIRST sets declarations
 extern std::unordered_set<int> FIRST_program;
 extern std::unordered_set<int> FIRST_decl;
-extern std::unordered_set<int> FIRST_extern;
 extern std::unordered_set<int> FIRST_type_spec;
 extern std::unordered_set<int> FIRST_expr;
-extern std::unordered_set<int> FIRST_stmt;
-extern std::unordered_set<int> FIRST_primary;
-extern std::unordered_set<int> FIRST_unary;
-extern std::unordered_set<int> FIRST_assign_expr;
 
 // FOLLOW sets declarations for non-terminals with ε productions
 extern std::unordered_set<int> FOLLOW_stmt_list;
+extern std::unordered_set<int> FOLLOW_param_list;
+extern std::unordered_set<int> FOLLOW_arg_list;
 extern std::unordered_set<int> FOLLOW_local_decls;
-extern std::unordered_set<int> FOLLOW_expr_stmt;
-extern std::unordered_set<int> FOLLOW_params;
-extern std::unordered_set<int> FOLLOW_args;
-
-bool isInFirst(int token, const std::unordered_set<int>& firstSet);
-bool isInFollow(int token, const std::unordered_set<int>& followSet);
 
 std::unique_ptr<ASTnode> parser();
 
-#endif // PARSER_H
+#endif

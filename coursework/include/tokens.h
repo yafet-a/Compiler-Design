@@ -76,7 +76,4 @@ struct TOKEN {
 // Utility function to create a token
 TOKEN returnTok(std::string lexVal, int tok_type);
 
-// Utility function to convert token type to string
-std::string tokenTypeToString(int type);
-
-#endif // TOKENS_H
+#endif

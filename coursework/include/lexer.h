@@ -15,7 +15,6 @@ extern float FloatVal;
 extern std::string StringVal;
 extern std::string currentLineContent;
 
-// Lexer function
 TOKEN gettok();
 
-#endif // LEXER_H
+#endif
