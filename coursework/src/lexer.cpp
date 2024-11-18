@@ -12,6 +12,7 @@ std::string currentLineContent;
 std::string currentFilename;
 long lineStartPos = 0;
 
+// tracking the current line content and passing it into TOKEN which is used for the errorHandler and AST node printing
 void updateCurrentLine() {
     long currentPos = ftell(pFile);
     fseek(pFile, lineStartPos, SEEK_SET);
@@ -22,7 +23,7 @@ void updateCurrentLine() {
         currentLineContent += (char)c;
     }
     
-    // Handle \r\n if needed
+    // Handle \r\n
     if (c == '\r') {
         if ((c = getc(pFile)) != '\n') {
             ungetc(c, pFile);

@@ -50,7 +50,7 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
 
 int main(int argc, char **argv) {
     if (argc == 2) {
-        currentFilename = argv[1];  // Store filename
+        currentFilename = argv[1];
         pFile = fopen(argv[1], "r");
         if (pFile == NULL) {
             perror("Error opening file");
@@ -61,12 +61,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Initialize line number and column numbers
+    // initialize line number and column numbers
     lineNo = 1;
     columnNo = 1;
-    std::string filename = argv[1];  // Save the filename
+    std::string filename = argv[1];  // save the filename for the error msg
 
-    // Get the first token
+    // get the first token
     getNextToken();
 
     // Make the module, which holds all the code
@@ -89,7 +89,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Print out the IR
+    //********************* Start printing final IR **************************
+    // Print out all of the generated code into a file called output.ll
     auto outputFile = "output.ll";
     std::error_code EC;
     raw_fd_ostream dest(outputFile, EC, sys::fs::OF_None);

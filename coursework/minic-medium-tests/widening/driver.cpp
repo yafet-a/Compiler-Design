@@ -27,8 +27,17 @@ bool true_plus_true();
 int main() {
     // Depending on `true+true`, this may fail - need to justify behaviour
     // in report.
-    if (widening_casts() && !true_plus_true())
+            std::cout << "PHELLOOOOOOO" << std::endl;
+
+    bool wideningResult = widening_casts();
+    bool truePlusTrueResult = true_plus_true();
+
+    std::cout << "widening_casts() returned: " << wideningResult << std::endl;
+    std::cout << "true_plus_true() returned: " << truePlusTrueResult << std::endl;
+
+    if (wideningResult && !truePlusTrueResult)
         std::cout << "PASSED Result: " << std::endl;
     else
         std::cout << "FAILED Result: " << std::endl;
-}
+
+} 

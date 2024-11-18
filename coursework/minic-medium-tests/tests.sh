@@ -49,8 +49,9 @@ function list_options {
   echo "2) long"
   echo "3) widening"
   echo "4) truthiness"
-  echo "5) Run all tests"
-  echo "6) Run failed tests"
+  echo "5) mutual"
+  echo "6) Run all tests"
+  echo "7) Run failed tests"
   echo "q) Quit"
 }
 
@@ -78,6 +79,7 @@ function run_all_tests {
   run_test "minic-medium-tests/long" "long" "long"
   run_test "minic-medium-tests/widening" "widening" "widening"
   run_test "minic-medium-tests/truthiness" "truthiness" "truthiness"
+  run_test "minic-medium-tests/mutual" "mutual" "mutual"
 }
 
 function run_all_failed_tests {
@@ -105,8 +107,9 @@ while true; do
     2) run_test "minic-medium-tests/long" "long" "long" || true ;;
     3) run_test "minic-medium-tests/widening" "widening" "widening" || true ;;
     4) run_test "minic-medium-tests/truthiness" "truthiness" "truthiness" || true ;;
-    5) run_all_tests || true ;;
-    6)
+    5) run_test "minic-medium-tests/mutual" "mutual" "mutual" || true ;;
+    6) run_all_tests || true ;;
+    7)
       while true; do
         list_failed_tests
         read -p "Enter your choice: " fail_choice

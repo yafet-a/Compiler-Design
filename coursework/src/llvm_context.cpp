@@ -5,7 +5,7 @@
 std::map<std::string, FunctionInfo> FunctionDeclarations;
 std::vector<std::map<std::string, VariableInfo>> NamedValuesStack = {{}};
 
-// Helper function implementations
+
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                         const std::string &VarName,
                                         llvm::Type *VarType) {
@@ -55,17 +55,21 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
                     llvm::ConstantFP::get(sourceType, 0.0), "float_to_bool");
             }
         } else {
-            // In non-conditional contexts, only allow bool operations to result in bool
-            // For arithmetic operations involving bools, they should be widened to int first
-            reportError("Cannot convert to bool outside conditional context", loc);
-            return nullptr;
+            std::string sourceTypeName = sourceType->isIntegerTy() ? "int" :
+                                   sourceType->isFloatTy() ? "float" :
+                                   sourceType->isIntegerTy(1) ? "bool" :
+                                   "unknown";
+            Note note{
+            "narrowing conversions are not allowed in return statements and function calls",
+            loc 
+        };
+        
+        reportError("Cannot convert from '" + sourceTypeName + "' to 'bool' outside conditional context", 
+                   loc, true, &note);
         }
     }
 
-    // Narrowing conversions (generate errors):
-    
-
-    // Unsupported type conversions
+    // For all other cases, report an error
     std::string sourceTypeName = sourceType->isIntegerTy() ? "int" :
                                  sourceType->isFloatTy() ? "float" :
                                  sourceType->isIntegerTy(1) ? "bool" :
@@ -75,17 +79,14 @@ llvm::Value* convertToType(llvm::Value* val, llvm::Type* targetType,
                                  targetType->isIntegerTy(1) ? "bool" :
                                  "unknown";
 
-    // Float to Int
+    // All examples of narrowing conversions as listed above for erroring
     if (sourceType->isFloatTy() && targetType->isIntegerTy()) {
         reportError("implicit conversion from '" + sourceTypeName + "' to '" + 
                    targetTypeName + "' may lose precision", loc);
-        return nullptr;
     }
     std::string errorMessage = "Unsupported type conversion from " + sourceTypeName + 
                                 " to " + targetTypeName;
     reportError(errorMessage, loc);
-    
-    return nullptr;
 }
 
 void pushScope() {
@@ -96,7 +97,7 @@ void popScope() {
     if (!NamedValuesStack.empty()) {
         NamedValuesStack.pop_back();
     } else {
-        // Handle error: popping from empty scope stack
+        reportError("Attempted to pop an empty scope", {});
     }
 }
 

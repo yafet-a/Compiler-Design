@@ -6,7 +6,6 @@
 
 const char* BRIGHT_MAGENTA = "\033[95m";
 
-// UTF-8 box drawing characters that match the tree command
 const char* VERTICAL = "│   ";
 const char* BRANCH = "├── ";
 const char* LAST_BRANCH = "└── ";
@@ -18,10 +17,21 @@ std::string formatLoc(const TOKEN& loc) {
     return ss.str();
 }
 
+/**
+
+ * @brief Core formatting function for AST node printing
+ * 
+ * @param indent Current indentation level (chosen to be 4 spaces for better readability)
+ * @param isLast Whether this node is the last child at its level
+ * @return std::string Tree connection characters showing hierarchy
+ * 
+ * @details Maintains a stack of boolean flags to track which levels 
+ * have pending siblings. This allows proper drawing of vertical 
+ * connection lines in multi-level trees.
+ */
 std::string ASTnode::getPrefix(int indent, bool isLast) {
     std::string result;
 
-    // Track whether each level is the last child
     static std::vector<bool> isLastLevel;
     if (indent / 4 > isLastLevel.size()) {
         isLastLevel.push_back(false);
@@ -50,10 +60,10 @@ std::string BinaryOpNode::to_string(int indent, bool isLast) const {
                         formatLoc(loc) + " " +
                         "'" + op + "'" + "\n";
     if (left) {
-        result += left->to_string(indent + 4, !right);  // right determines if left is last
+        result += left->to_string(indent + 4, !right);
     }
     if (right) {
-        result += right->to_string(indent + 4, true);   // right is always last
+        result += right->to_string(indent + 4, true);
     }
     return result;
 }
@@ -92,8 +102,6 @@ std::string IfNode::to_string(int indent, bool isLast) const {
     }
     return result;
 }
-
-
 
 std::string TypeNode::to_string(int indent, bool isLast) const {
     return getPrefix(indent, isLast) + "TypeNode" + formatLoc(loc) + 
@@ -194,7 +202,7 @@ std::string WhileNode::to_string(int indent, bool isLast) const {
 std::string ReturnNode::to_string(int indent, bool isLast) const {
     std::string result = getPrefix(indent, isLast) + "ReturnStmt" + formatLoc(loc) + "\n";
     if (value) {
-        result += value->to_string(indent + 4, true);  // return value is always last
+        result += value->to_string(indent + 4, true);
     }
     return result;
 }
@@ -211,7 +219,7 @@ std::string UnaryOpNode::to_string(int indent, bool isLast) const {
     std::string result = getPrefix(indent, isLast) + "UnaryOperator" + formatLoc(loc) + 
                         " '" + op + "'\n";
     if (operand) {
-        result += operand->to_string(indent + 4, true);  // always last as single child
+        result += operand->to_string(indent + 4, true);
     }
     return result;
 }
@@ -220,13 +228,12 @@ std::string AssignNode::to_string(int indent, bool isLast) const {
     std::string result = getPrefix(indent, isLast) + "BinaryOperator" + formatLoc(loc) + 
                         " '='\n";
     
-    // Variable reference
+    // variable reference
     result += getPrefix(indent + 4, !value) + "DeclRefExpr" + formatLoc(loc) + 
               " '" + name + "'\n";
     
-    // Value being assigned
     if (value) {
-        result += value->to_string(indent + 4, true);  // value is always last
+        result += value->to_string(indent + 4, true);
     }
     return result;
 }
@@ -235,11 +242,9 @@ std::string FunctionCallNode::to_string(int indent, bool isLast) const {
     std::string result = getPrefix(indent, isLast) + "FunctionCall" + formatLoc(loc) + 
                         " '" + name + "'\n";
     
-    // Function reference
     result += getPrefix(indent + 4, arguments.empty()) + 
               "DeclRefExpr" + formatLoc(loc) + " '" + name + "'\n";
     
-    // Arguments
     for (size_t i = 0; i < arguments.size(); i++) {
         bool isLastArg = (i == arguments.size() - 1);
         result += arguments[i]->to_string(indent + 4, isLastArg);
@@ -265,7 +270,6 @@ std::string ExternListNode::to_string(int indent, bool isLast) const {
     return result;
 }
 
-// ProgramNode
 Value* ProgramNode::codegen() {
     for (const auto& ext : externs) {
         if (!ext->codegen()) {
@@ -281,17 +285,17 @@ Value* ProgramNode::codegen() {
         }
     }
     
-    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0)); // Dummy value
+    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0));
 }
 
-// ExternNode
+
 Value* ExternNode::codegen() {
+
     std::vector<Type*> ArgTypes;
     for (const auto& param : params) {
         Type* paramType = getTypeFromStr(param.first);
         if (!paramType) {
-            std::cerr << "Error: Unknown type for parameter: " << param.first << "\n";
-            return nullptr;
+            reportError("Unknown type in function parameter: " + param.first, loc);
         }
         ArgTypes.push_back(paramType);
     }
@@ -303,9 +307,14 @@ Value* ExternNode::codegen() {
     }
     
     FunctionType *FT = FunctionType::get(RetType, ArgTypes, false);
-    Function *F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
-    
-    // Set parameter names
+Function *F = Function::Create(
+        FT, 
+        Function::ExternalLinkage,
+        name,
+        TheModule.get()
+    );
+    F->setCallingConv(llvm::CallingConv::C);    
+    // Setting up the parameter names
     unsigned Idx = 0;
     for (auto &Arg : F->args()) {
         Arg.setName(params[Idx++].second);
@@ -315,45 +324,38 @@ Value* ExternNode::codegen() {
 }
 
 
-// VarDeclNode
 Value* VarDeclNode::codegen() {
     llvm::Type* varType = getTypeFromStr(type);
     if (!varType) {
         reportError("Unknown type in variable declaration: " + type, loc);
-        return nullptr;
     }
 
     llvm::Function* TheFunction = Builder.GetInsertBlock() ? Builder.GetInsertBlock()->getParent() : nullptr;
 
     if (TheFunction) {
-        // Local variable
         auto& CurrentScope = NamedValuesStack.back();
 
-        // Check for redefinition in the current scope
         if (CurrentScope.find(name) != CurrentScope.end()) {
             Note note{
                 "previous declaration of '" + name + "' was here",
                 CurrentScope[name].declLocation
             };
             reportError("Redefinition of local variable '" + name + "'", loc, true, &note);
-            return nullptr;
         }
 
-        // Create new alloca for the variable
         llvm::AllocaInst* Alloca = CreateEntryBlockAlloca(TheFunction, name, varType);
 
-        // Store the variable in the current scope
+
         CurrentScope[name] = { Alloca, varType, false, loc };
         return Alloca;
     } else {
-        // Global variable handling remains the same
+
         if (TheModule->getGlobalVariable(name)) {
             Note note{
                 "previous declaration of '" + name + "' was here",
                 GlobalNamedValues[name].declLocation
             };
             reportError("Redefinition of global variable '" + name + "'", loc, true, &note);
-            return nullptr;
         }
 
         llvm::GlobalVariable* GlobalVar = new llvm::GlobalVariable(
@@ -370,31 +372,28 @@ Value* VarDeclNode::codegen() {
     }
 }
 
-// FunctionNode 
 Value* FunctionNode::codegen() {
-    
-    // Create function type
+    Function* ExistingFunc = TheModule->getFunction(name);
+
     std::vector<Type*> ArgTypes;
     for (const auto& param : params) {
         Type* paramType = getTypeFromStr(param.first);
         if (!paramType) {
-            std::cerr << "Error: Unknown type for parameter: " << param.first << "\n";
-            return nullptr;
+            reportError("Unknown type in function parameter: " + param.first, loc);
         }
         ArgTypes.push_back(paramType);
     }
     
     Type* RetType = getTypeFromStr(returnType);
     if (!RetType) {
-        std::cerr << "Error: Unknown return type: " << returnType << "\n";
-        return nullptr;
+        reportError("Unknown return type: " + returnType, loc);
     }
     
     FunctionType *FT = FunctionType::get(RetType, ArgTypes, false);
     
-    // Add error checking for redefinition and type conflicts before creating the function
+    // add error checking for redefinition and type conflicts before creating the function (important for mutual recursion)
     if (Function* existingFunc = TheModule->getFunction(name)) {
-        // Check for type mismatch with existing declaration
+        // check for type mismatch with existing declaration
         if (existingFunc->getFunctionType() != FT) {
             Note note{
                 "previous declaration is here",
@@ -402,7 +401,7 @@ Value* FunctionNode::codegen() {
             };
             reportError("conflicting types for '" + name + "'", loc, true, &note);
         }
-        if (!existingFunc->empty()) {  // Has body, so it's a definition
+        if (!existingFunc->empty()) {
             Note note{
                 "previous definition is here",
                 FunctionDeclarations[name].declLocation
@@ -412,20 +411,32 @@ Value* FunctionNode::codegen() {
         
     }
 
-    Function *F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
+    Function *F;
+    if (ExistingFunc) {
+        if (ExistingFunc->getFunctionType() != FT) {
+            reportError("Function redefinition with different type", loc);
+        }
+        F = ExistingFunc;
+    } else {
+        F = Function::Create(FT, Function::ExternalLinkage, name, TheModule.get());
+        F->setCallingConv(llvm::CallingConv::C);
+    }
     
-    // Store function declaration info for future error messages
+    // don't create a new body if one already exists
+    if (!F->empty()) {
+        reportError("Redefinition of function '" + name + "'", loc);
+    }
+    
+    // using functiondeclarations for the reportError notes
     FunctionDeclarations[name] = { F, loc };
     
-    // Create basic block
     BasicBlock *BB = BasicBlock::Create(TheContext, "entry", F);
     Builder.SetInsertPoint(BB);
     
-    // Push a new scope for the function body
     pushScope();
     auto& CurrentScope = NamedValuesStack.back();
     
-    // Set up parameters
+    // set up parameters
     unsigned Idx = 0;
     for (auto &Arg : F->args()) {
         Arg.setName(params[Idx].second);
@@ -433,18 +444,17 @@ Value* FunctionNode::codegen() {
         AllocaInst *Alloca = CreateEntryBlockAlloca(F, params[Idx].second, paramType);
         Builder.CreateStore(&Arg, Alloca);
 
-        // Check for parameter name conflicts in the current scope
+        // check for duplicate parameter names within the same scope
         if (CurrentScope.find(params[Idx].second) != CurrentScope.end()) {
             Note note{
                 "previous declaration of parameter '" + params[Idx].second + "' was here",
                 CurrentScope[params[Idx].second].declLocation
             };
             reportError("Duplicate parameter name '" + params[Idx].second + "'", loc, true, &note);
-            popScope();  // Clean up scope before returning
-            return nullptr;
+            popScope();
         }
 
-        // Store VariableInfo in CurrentScope
+        // store VariableInfo in CurrentScope
         CurrentScope[params[Idx].second] = { Alloca, paramType, false, loc };
         Idx++;
     }
@@ -460,76 +470,68 @@ Value* FunctionNode::codegen() {
                 }
             }
             
-            // Verify the function
             verifyFunction(*F);
-            // Restore the previous scope
             popScope();
             return F;
         } else {
             std::cerr << "Error: Failed to generate code for function body\n";
-            popScope();  // Clean up scope before returning
+            popScope();
         }
     } else {
         std::cerr << "Error: Function body is missing\n";
     }
     
-    // Remove the function if codegen failed
     F->eraseFromParent();
-    popScope();  // Clean up scope before returning
+    popScope();
     return nullptr;
 }
 
-// BlockNode
+
 Value* BlockNode::codegen() {
     Value* Last = nullptr;
 
-    // Push a new scope for the block
+    //begin by pushing a new scope
     pushScope();
 
-    // Generate code for declarations in new scope
+    // decls
     for (const auto& decl : declarations) {
         Last = decl->codegen();
         if (!Last) {
-            std::cerr << "Error: Failed to generate code for declaration\n";
-            popScope();  // Clean up scope before returning
-            return nullptr;
+            reportError("Failed to generate code for declaration", decl->loc);
+            popScope();
         }
     }
 
-    // Generate code for statements
+    // stmts
     for (const auto& stmt : statements) {
         Last = stmt->codegen();
         if (!Last) {
-            std::cerr << "Error: Failed to generate code for statement\n";
-            popScope();  // Clean up scope before returning
-            return nullptr;
+            reportError("Failed to generate code for statement", stmt->loc);
+            popScope();
         }
 
-        // If block is terminated (e.g., by a return), stop generating more code
+        // If block is terminated like hitting a return, break
         if (Builder.GetInsertBlock()->getTerminator())
             break;
     }
-
-    // Pop the block scope
+    
     popScope();
 
     return Last;
 }
 
-// IfNode modification
+
 Value* IfNode::codegen() {
     Value *CondV = condition->codegen();
     if (!CondV) {
-        std::cerr << "Error: Failed to generate code for condition\n";
-        return nullptr;
+        reportError("Failed to generate code for if condition", loc);
     }
 
     // Convert condition to bool using convertToType with conditional context
     if (!CondV->getType()->isIntegerTy(1)) {
         CondV = convertToType(CondV, llvm::Type::getInt1Ty(TheContext), true, loc);
         if (!CondV) {
-            std::cerr << "Error: Failed to convert condition to bool\n";
-            return nullptr;
+            reportError("Failed to convert condition to bool", loc);
         }
     }
 
@@ -558,8 +560,7 @@ Value* IfNode::codegen() {
     Builder.SetInsertPoint(ThenBB);
     Value *ThenV = thenBlock->codegen();
     if (!ThenV) {
-        std::cerr << "Error: Failed to generate code for then block\n";
-        return nullptr;
+        reportError("Failed to generate code for then block", loc);
     }
     // Add branch to merge block if it doesn't already have a terminator
     if (!Builder.GetInsertBlock()->getTerminator()) {
@@ -571,8 +572,7 @@ Value* IfNode::codegen() {
         Builder.SetInsertPoint(ElseBB);
         Value *ElseV = elseBlock->codegen();
         if (!ElseV) {
-            std::cerr << "Error: Failed to generate code for else block\n";
-            return nullptr;
+            reportError("Failed to generate code for else block", loc);
         }
         // Add branch to merge block if it doesn't already have a terminator
         if (!Builder.GetInsertBlock()->getTerminator()) {
@@ -586,7 +586,6 @@ Value* IfNode::codegen() {
     return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0));
 }
 
-// WhileNode modification
 Value* WhileNode::codegen() {
     
     Function *TheFunction = Builder.GetInsertBlock()->getParent();
@@ -603,22 +602,14 @@ Value* WhileNode::codegen() {
     Builder.SetInsertPoint(HeaderBB);
     Value *CondV = condition->codegen();
     if (!CondV) {
-        std::cerr << "Error: Failed to generate code for while condition\n";
-        return nullptr;
+        reportError("Failed to generate code for while condition", loc);
     }
 
-    // Convert condition to bool if necessary (for C-style conditions)
+    // Convert condition to bool using convertToType with conditional context
     if (!CondV->getType()->isIntegerTy(1)) {
-        if (CondV->getType()->isIntegerTy()) {
-            // Compare with 0 to convert to bool
-            CondV = Builder.CreateICmpNE(
-                CondV, 
-                ConstantInt::get(CondV->getType(), 0),
-                "while.cond"
-            );
-        } else {
-            std::cerr << "Error: While condition must be convertible to bool\n";
-            return nullptr;
+        CondV = convertToType(CondV, llvm::Type::getInt1Ty(TheContext), true, loc);
+        if (!CondV) {
+            reportError("Failed to convert condition to bool", loc);
         }
     }
 
@@ -632,8 +623,7 @@ Value* WhileNode::codegen() {
     // Emit the body block
     Builder.SetInsertPoint(BodyBB);
     if (!body->codegen()) {
-        std::cerr << "Error: Failed to generate code for while body\n";
-        return nullptr;
+        reportError("Failed to generate code for while body", loc);
     }
 
     // Create branch back to header block if the block isn't already terminated
@@ -647,7 +637,6 @@ Value* WhileNode::codegen() {
     return Constant::getNullValue(Type::getInt32Ty(TheContext));
 }
 
-// ReturnNode
 Value* ReturnNode::codegen() {
     // Get function and its return type
     Function* TheFunction = Builder.GetInsertBlock()->getParent();
@@ -657,26 +646,25 @@ Value* ReturnNode::codegen() {
     // If function returns void but we have a return value
     if (RetType->isVoidTy() && value) {
         reportError("void function '" + FuncName + "' cannot return a value", loc);
-        return nullptr;
     }
     
     // If function doesn't return void but we don't have a return value
     if (!RetType->isVoidTy() && !value) {
         reportError("non-void function '" + FuncName + "' should return a value", loc);
-        return nullptr;
     }
 
     Value* RetVal = nullptr;
     if (value) {
         RetVal = value->codegen();
-        if (!RetVal) return nullptr;
+        if (!RetVal){
+            reportError("Failed to generate code for return value", loc);
+        }
 
         // If the return value type does not match the function's return type, try to convert it
         if (RetVal && RetVal->getType() != RetType) {
             RetVal = convertToType(RetVal, RetType, false, loc);
             if (!RetVal) {
-                // Let convertToType handle the specific type conversion error message
-                return nullptr;
+                reportError("Failed to convert return value to function return type", loc);
             }
         }
     }
@@ -684,32 +672,33 @@ Value* ReturnNode::codegen() {
     return Builder.CreateRet(RetVal);
 }
 
-// ExprStmtNode
 Value* ExprStmtNode::codegen() {
     Value* Val = expr->codegen();
     if (!Val) {
-        std::cerr << "Error: Failed to generate code for expression in ExprStmtNode\n";
-        return nullptr;
+        reportError("Failed to generate code for expression statement", loc);
     }
     // The value is not used further, as it's an expression statement.
     return Val;
 }
 
-// BinaryOpNode
 Value* BinaryOpNode::codegen() {
 
-    // Special handling for logical operators
+    // Lazy evaluation for logical operators
     if (op == "&&" || op == "||") {
         Function* TheFunction = Builder.GetInsertBlock()->getParent();
         
         // Generate code for left operand
         Value* L = left->codegen();
-        if (!L) return nullptr;
+        if (!L){
+            reportError("Failed to generate code for left operand", loc);
+        };
 
         // Convert to bool if needed
         if (!L->getType()->isIntegerTy(1)) {
             L = convertToType(L, Type::getInt1Ty(TheContext), true, loc);
-            if (!L) return nullptr;
+            if (!L){
+                reportError("Failed to convert left operand to bool", loc);
+            }
         }
 
         // Create blocks but don't insert yet
@@ -733,11 +722,9 @@ Value* BinaryOpNode::codegen() {
         // Emit RHS block
         Builder.SetInsertPoint(RHSBlock);
         Value* R = right->codegen();
-        if (!R) return nullptr;
 
         if (!R->getType()->isIntegerTy(1)) {
             R = convertToType(R, Type::getInt1Ty(TheContext), true, loc);
-            if (!R) return nullptr;
         }
 
         // Store the RHS end block for PHI
@@ -748,11 +735,11 @@ Value* BinaryOpNode::codegen() {
         Builder.SetInsertPoint(MergeBlock);
         PHINode* PN = Builder.CreatePHI(Type::getInt1Ty(TheContext), 2, "logical.result");
 
-        // Set up PHI node values
+        // Adding incoming values for the PHI node
         if (op == "&&") {
             PN->addIncoming(ConstantInt::getFalse(TheContext), EntryBlock);
             PN->addIncoming(R, RHSEndBlock);
-        } else { // op == "||"
+        } else {
             PN->addIncoming(ConstantInt::getTrue(TheContext), EntryBlock);
             PN->addIncoming(R, RHSEndBlock);
         }
@@ -765,11 +752,9 @@ Value* BinaryOpNode::codegen() {
     Value* R = right->codegen();
     if (!L || !R) {
         reportError("Invalid operands to binary expression", loc);
-        return nullptr;
     }
 
-    // For arithmetic operations
-    // If either operand is float, convert both to float
+    // For all binary operations, handle type conversions first
     if (L->getType()->isFloatTy() || R->getType()->isFloatTy()) {
         if (!L->getType()->isFloatTy()) {
             L = convertToType(L, Type::getFloatTy(TheContext), false, loc);
@@ -777,145 +762,110 @@ Value* BinaryOpNode::codegen() {
         if (!R->getType()->isFloatTy()) {
             R = convertToType(R, Type::getFloatTy(TheContext), false, loc);
         }
-        if (!L || !R) return nullptr;
-    }
-    // Otherwise if either is int32, convert both to int32
-    else if (L->getType()->isIntegerTy(32) || R->getType()->isIntegerTy(32)) {
-        if (!L->getType()->isIntegerTy(32)) {
-            L = convertToType(L, Type::getInt32Ty(TheContext), false, loc);
+        
+        // Floating point operations
+        if (op == "+") return Builder.CreateFAdd(L, R, "addtmp");
+        if (op == "-") return Builder.CreateFSub(L, R, "subtmp");
+        if (op == "*") return Builder.CreateFMul(L, R, "multmp");
+        if (op == "/") return Builder.CreateFDiv(L, R, "divtmp");
+        if (op == "%") {
+            reportError("Modulo not supported for floating point", loc);
+            return nullptr;
         }
-        if (!R->getType()->isIntegerTy(32)) {
-            R = convertToType(R, Type::getInt32Ty(TheContext), false, loc);
-        }
-        if (!L || !R) return nullptr;
-    }
-
-    // Create the result based on operator
-    if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%") {
-        if (L->getType()->isFloatTy()) {
-            if (op == "%") {
-                std::cerr << "Error: Modulo not supported for floating point\n";
-                return nullptr;
+        // Float comparisons
+        if (op == "<")  return Builder.CreateFCmpOLT(L, R, "cmptmp");
+        if (op == "<=") return Builder.CreateFCmpOLE(L, R, "cmptmp");
+        if (op == ">")  return Builder.CreateFCmpOGT(L, R, "cmptmp");
+        if (op == ">=") return Builder.CreateFCmpOGE(L, R, "cmptmp");
+        if (op == "==") return Builder.CreateFCmpOEQ(L, R, "cmptmp");
+        if (op == "!=") return Builder.CreateFCmpONE(L, R, "cmptmp");
+    } 
+    else {
+        // For non-float operations, convert to int32 (except when both are bool and doing comparison)
+        bool bothBool = L->getType()->isIntegerTy(1) && R->getType()->isIntegerTy(1);
+        bool isComparison = (op == "==" || op == "!=" || op == "<" || op == "<=" || 
+                           op == ">" || op == ">=");
+        
+        if (!bothBool || !isComparison) {
+            if (!L->getType()->isIntegerTy(32)) {
+                L = convertToType(L, Type::getInt32Ty(TheContext), false, loc);
             }
-            if (op == "+") return Builder.CreateFAdd(L, R, "addtmp");
-            if (op == "-") return Builder.CreateFSub(L, R, "subtmp");
-            if (op == "*") return Builder.CreateFMul(L, R, "multmp");
-            if (op == "/") return Builder.CreateFDiv(L, R, "divtmp");
-        } else {
-            if (op == "+") return Builder.CreateAdd(L, R, "addtmp");
-            if (op == "-") return Builder.CreateSub(L, R, "subtmp");
-            if (op == "*") return Builder.CreateMul(L, R, "multmp");
-            if (op == "/") return Builder.CreateSDiv(L, R, "divtmp");
-            if (op == "%") return Builder.CreateSRem(L, R, "modtmp");
+            if (!R->getType()->isIntegerTy(32)) {
+                R = convertToType(R, Type::getInt32Ty(TheContext), false, loc);
+            }
         }
+
+        // Integer operations
+        if (op == "+") return Builder.CreateAdd(L, R, "addtmp");
+        if (op == "-") return Builder.CreateSub(L, R, "subtmp");
+        if (op == "*") return Builder.CreateMul(L, R, "multmp");
+        if (op == "/") return Builder.CreateSDiv(L, R, "divtmp");
+        if (op == "%") return Builder.CreateSRem(L, R, "modtmp");
+        // Integer comparisons
+        if (op == "<")  return Builder.CreateICmpSLT(L, R, "cmptmp");
+        if (op == "<=") return Builder.CreateICmpSLE(L, R, "cmptmp");
+        if (op == ">")  return Builder.CreateICmpSGT(L, R, "cmptmp");
+        if (op == ">=") return Builder.CreateICmpSGE(L, R, "cmptmp");
+        if (op == "==") return Builder.CreateICmpEQ(L, R, "cmptmp");
+        if (op == "!=") return Builder.CreateICmpNE(L, R, "cmptmp");
     }
 
-    // Handle comparisons (==, !=, <, >, <=, >=)
-    if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") {
-        // For comparisons between booleans, leave them as bools
-        if (L->getType()->isIntegerTy(1) && R->getType()->isIntegerTy(1)) {
-            if (op == "==") return Builder.CreateICmpEQ(L, R, "eqtmp");
-            if (op == "!=") return Builder.CreateICmpNE(L, R, "neqtmp");
-        }
-
-        // For other comparisons, do the usual type conversion
-        bool isFloating = L->getType()->isFloatTy() || R->getType()->isFloatTy();
-
-        if (isFloating) {
-            if (op == "<")  return Builder.CreateFCmpOLT(L, R, "cmptmp");
-            if (op == "<=") return Builder.CreateFCmpOLE(L, R, "cmptmp");
-            if (op == ">")  return Builder.CreateFCmpOGT(L, R, "cmptmp");
-            if (op == ">=") return Builder.CreateFCmpOGE(L, R, "cmptmp");
-            if (op == "==") return Builder.CreateFCmpOEQ(L, R, "cmptmp");
-            if (op == "!=") return Builder.CreateFCmpONE(L, R, "cmptmp");
-        } else {
-            if (op == "<")  return Builder.CreateICmpSLT(L, R, "cmptmp");
-            if (op == "<=") return Builder.CreateICmpSLE(L, R, "cmptmp");
-            if (op == ">")  return Builder.CreateICmpSGT(L, R, "cmptmp");
-            if (op == ">=") return Builder.CreateICmpSGE(L, R, "cmptmp");
-            if (op == "==") return Builder.CreateICmpEQ(L, R, "cmptmp");
-            if (op == "!=") return Builder.CreateICmpNE(L, R, "cmptmp");
-        }
-    }
-
-    std::cerr << "Error: Unknown binary operator: " << op << "\n";
-    return nullptr;
+    reportError("Unknown binary operator: " + op, loc);
 }
 
-// UnaryOpNode
 Value* UnaryOpNode::codegen() {
     Value* Val = operand->codegen();
     if (!Val) {
-        std::cerr << "Error: Failed to generate code for operand\n";
-        return nullptr;
+        reportError("Failed to generate code for operand", loc);
     }
 
     if (op == "!") {
-        // First convert operand to bool if it isn't already
-        Value* BoolVal;
-        if (Val->getType()->isIntegerTy(1)) {
-            BoolVal = Val;
-        } else if (Val->getType()->isIntegerTy()) {
-            // Convert integer to bool (0 = false, non-0 = true)
-            BoolVal = Builder.CreateICmpNE(
-                Val, 
-                ConstantInt::get(Val->getType(), 0), 
-                "to_bool"
-            );
-        } else if (Val->getType()->isFloatTy()) {
-            // Convert float to bool (0.0 = false, non-0.0 = true)
-            BoolVal = Builder.CreateFCmpONE(
-                Val,
-                ConstantFP::get(Val->getType(), 0.0),
-                "to_bool"
-            );
-        } else {
-            std::cerr << "Error: Invalid operand type for ! operator\n";
-            return nullptr;
+        // Convert operand to bool in conditional context since we're doing logical operation
+        Value* BoolVal = convertToType(Val, Type::getInt1Ty(TheContext), true, loc);
+        if (!BoolVal) {
+            reportError("Failed to convert operand to bool", loc);
         }
         
-        // Now perform the logical NOT
+        // Perform the logical NOT
         return Builder.CreateNot(BoolVal, "not");
-    } else if (op == "-") {
-        // For negation, first ensure we're working with a numeric type
+    } 
+    else if (op == "-") {
+        // For negation, determine target type based on input
         if (Val->getType()->isFloatTy()) {
             return Builder.CreateFNeg(Val, "neg");
-        } else if (Val->getType()->isIntegerTy(32)) {
-            return Builder.CreateNeg(Val, "neg");
-        } else if (Val->getType()->isIntegerTy(1)) {
-            // For bool, first convert to int32, then negate
-            Value* IntVal = Builder.CreateZExt(Val, Type::getInt32Ty(TheContext), "bool_to_int");
+        } 
+        else {
+            // For any integer type (including bool), convert to int32 first
+            Value* IntVal = convertToType(Val, Type::getInt32Ty(TheContext), false, loc);
+            if (!IntVal) {
+                reportError("Failed to convert operand to int", loc);
+            }
             return Builder.CreateNeg(IntVal, "neg");
         }
     }
 
-    std::cerr << "Error: Invalid unary operator or operand type\n";
-    return nullptr;
+    reportError("Unknown unary operator: " + op, loc);
 }
 
-// AssignNode
 Value* AssignNode::codegen() {
     Value* Val = value->codegen();
     if (!Val) {
-        std::cerr << "Error: Failed to generate code for value\n";
-        return nullptr;
+        reportError("Failed to generate code for assignment value", loc);
     }
 
-    // Use findVariable to get the variable information
+    //find the variable in the current scope
     VariableInfo* varInfo = findVariable(name);
     if (!varInfo) {
-        reportError("use of undeclared indentifier '" + name + "'", loc);
-        return nullptr;
+        reportError("Use of undeclared identifier '" + name + "'", loc);
     }
 
     // Handle all type conversions through convertToType
     if (Val->getType() != varInfo->type) {
-        // Pass true for inConditionalContext if assigning to a bool
+        // Assignments should be allowed to convert to bool if needed since it isn't a return or function call like the spec specifies
         bool isAssigningToBool = varInfo->type->isIntegerTy(1);
         Val = convertToType(Val, varInfo->type, isAssigningToBool, loc);
         if (!Val) {
-            std::cerr << "Error: Invalid type conversion\n";
-            return nullptr;
+            reportError("Failed to convert value to variable type", loc);
         }
     }
 
@@ -926,14 +876,12 @@ Value* AssignNode::codegen() {
 // VariableNode
 Value* VariableNode::codegen() {
 
-    // Use findVariable to get the variable information
+    //find the variable in the current scope
     VariableInfo* varInfo = findVariable(name);
     if (!varInfo) {
         reportError("Use of undeclared identifier '" + name + "'", loc);
-        return nullptr;
     }
 
-    // Load the variable value
     return Builder.CreateLoad(varInfo->type, varInfo->value, name.c_str());
 }
 // FunctionCallNode
@@ -996,7 +944,9 @@ Value* FunctionCallNode::codegen() {
 
     for (unsigned i = 0; i < arguments.size(); i++, ++funcArgsIt) {
         Value* ArgVal = arguments[i]->codegen();
-        if (!ArgVal) return nullptr;
+        if (!ArgVal) {
+            reportError("Failed to generate code for function argument", arguments[i]->loc);
+        }
 
         // Get the expected parameter type from the function declaration
         Type* paramType = funcArgsIt->getType();
@@ -1004,7 +954,9 @@ Value* FunctionCallNode::codegen() {
         // Convert argument to the parameter type if needed
         if (ArgVal->getType() != paramType) {
             ArgVal = convertToType(ArgVal, paramType, false, arguments[i]->loc);
-            if (!ArgVal) return nullptr;
+            if (!ArgVal) {
+                reportError("Failed to convert argument to parameter type", arguments[i]->loc);
+            }
         }
         
         ArgsV.push_back(ArgVal);
@@ -1026,23 +978,22 @@ Value* LiteralNode::codegen() {
             std::cerr << (value.boolValue ? "true" : "false") << "\n";
             return llvm::ConstantInt::get(TheContext, llvm::APInt(1, value.boolValue));
         default:
-            std::cerr << "Error: Unknown literal type\n";
-            return nullptr;
+            reportError("Unknown literal type", loc);
     }
 }
 
 Value* ExternListNode::codegen() {
     for (const auto& ext : externs) {
         if (!ext->codegen())
-            return nullptr;
+            reportError("Failed to generate code for extern", ext->loc);
     }
-    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0)); // Dummy value
+    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0));
 }
 
 Value* DeclListNode::codegen() {
     for (const auto& decl : declarations) {
         if (!decl->codegen())
-            return nullptr;
+            reportError("Failed to generate code for declaration", decl->loc);
     }
-    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0)); // Dummy value
+    return llvm::ConstantInt::get(TheContext, llvm::APInt(32, 0));
 }
